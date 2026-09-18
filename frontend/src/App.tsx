@@ -18,7 +18,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans">
-      <Header onRefreshAll={handleHeaderRefresh} isRefreshing={isRefreshing} />
+      <Header onRefresh={handleHeaderRefresh} isRefreshing={isRefreshing} />
 
       <main className="flex-1 max-w-7xl 2xl:max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <DashboardPage

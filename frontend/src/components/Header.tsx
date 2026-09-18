@@ -2,11 +2,11 @@ import React from 'react';
 import { Terminal, RefreshCw, Layers } from 'lucide-react';
 
 interface HeaderProps {
-  onRefreshAll: () => void;
+  onRefresh: () => void;
   isRefreshing: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onRefreshAll, isRefreshing }) => {
+export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
   return (
     <header className="border-b border-slate-800 bg-[#0d1322]/80 backdrop-blur sticky top-0 z-50">
       <div className="max-w-7xl 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -15,7 +15,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefreshAll, isRefreshing }) =>
             <Terminal className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center space-x-2 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center space-x-2">
               <h1 className="text-base font-semibold tracking-tight text-slate-100 whitespace-nowrap">
                 AI Software Failure Investigator
               </h1>
@@ -36,13 +36,13 @@ export const Header: React.FC<HeaderProps> = ({ onRefreshAll, isRefreshing }) =>
           </div>
 
           <button
-            onClick={onRefreshAll}
+            onClick={onRefresh}
             disabled={isRefreshing}
             className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer select-none"
-            title="Refresh all system health checks and project records"
+            title="Refresh projects"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
-            <span className="whitespace-nowrap">{isRefreshing ? 'Refreshing...' : 'Refresh All'}</span>
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
           </button>
         </div>
       </div>

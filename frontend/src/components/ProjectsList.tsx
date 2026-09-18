@@ -38,34 +38,37 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
           <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono">
             Active Projects ({projects.length})
           </h2>
+
+          {/* Small inline loading indicator beside ACTIVE PROJECTS */}
+          {isRefreshing && (
+            <span className="inline-flex items-center space-x-1.5 text-xs font-mono text-indigo-400">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span className="text-[11px]">Updating...</span>
+            </span>
+          )}
+
           <span className="hidden sm:inline text-xs text-slate-500 font-mono">
             source: Supabase PostgreSQL
           </span>
-          {isRefreshing && projects.length > 0 && (
-            <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[11px] font-mono text-indigo-300 bg-indigo-950/70 border border-indigo-800/50 whitespace-nowrap">
-              <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
-              <span>Refreshing...</span>
-            </span>
-          )}
         </div>
 
         <button
           onClick={onRefresh}
           disabled={isRefreshing}
           className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded text-xs text-indigo-400 hover:text-indigo-300 font-mono bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
-          title="Refresh projects list from database"
+          title="Refresh projects"
         >
           <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
-          <span className="whitespace-nowrap">{isRefreshing ? 'Refreshing...' : 'Refresh Projects'}</span>
+          <span>{isRefreshing ? 'Refreshing...' : 'Refresh Projects'}</span>
         </button>
       </div>
 
-      {/* Non-blocking warning banner if refresh failed but previous projects are preserved */}
+      {/* Small non-blocking error/warning message if refresh failed but previous data is preserved */}
       {warning && projects.length > 0 && (
-        <div className="bg-amber-950/25 border border-amber-800/40 rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-amber-200 gap-3">
+        <div className="bg-amber-950/25 border border-amber-800/40 rounded-md px-3.5 py-2 flex items-center justify-between text-xs text-amber-200 gap-3">
           <div className="flex items-center space-x-2 min-w-0">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="break-words [overflow-wrap:anywhere]">{warning}</span>
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="break-words">{warning}</span>
           </div>
           <button
             onClick={onRefresh}
@@ -77,49 +80,47 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
         </div>
       )}
 
-      {/* Large initial error state: ONLY displayed if projects have NEVER successfully loaded */}
+      {/* Initial load failure when projects have NEVER loaded */}
       {error && projects.length === 0 ? (
-        <div className="bg-rose-950/20 border border-rose-800/40 rounded-lg p-5 text-slate-300 space-y-2.5 min-h-[160px] flex flex-col justify-center">
+        <div className="bg-rose-950/20 border border-rose-800/40 rounded-lg p-5 text-slate-300 space-y-2.5 min-h-[140px] flex flex-col justify-center">
           <div className="flex items-center space-x-2 text-rose-400 font-medium text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>Unable to retrieve projects from backend</span>
           </div>
-          <p className="text-xs text-slate-400 font-mono pl-6 break-words [overflow-wrap:anywhere]">{error}</p>
+          <p className="text-xs text-slate-400 font-mono pl-6 break-words">{error}</p>
           <div className="pl-6 text-xs text-slate-400">
-            Check your Supabase credentials in <code className="text-slate-300 bg-slate-800 px-1 py-0.5 rounded whitespace-nowrap">backend/.env</code> and ensure the <code className="text-slate-300 bg-slate-800 px-1 py-0.5 rounded whitespace-nowrap">projects</code> table has been created using <code className="text-slate-300 bg-slate-800 px-1 py-0.5 rounded whitespace-nowrap">data/schema.sql</code>.
+            Ensure the FastAPI server is running and Supabase credentials are set in <code className="text-slate-300 bg-slate-800 px-1 py-0.5 rounded">backend/.env</code>.
           </div>
         </div>
       ) : isInitialLoading && projects.length === 0 ? (
-        /* Initial loading placeholder */
-        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-8 text-center text-slate-400 text-sm font-mono min-h-[160px] flex flex-col items-center justify-center space-y-2">
+        /* Clean initial loading placeholder */
+        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-8 text-center text-slate-400 text-sm font-mono min-h-[140px] flex flex-col items-center justify-center space-y-2">
           <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-          <div>Querying projects via FastAPI & Supabase...</div>
+          <div>Loading projects...</div>
         </div>
       ) : projects.length === 0 ? (
         /* Empty State */
-        <div className="bg-[#0f172a] border border-slate-800/80 rounded-lg p-8 text-center space-y-3 min-h-[160px] flex flex-col items-center justify-center">
+        <div className="bg-[#0f172a] border border-slate-800/80 rounded-lg p-8 text-center space-y-3 min-h-[140px] flex flex-col items-center justify-center">
           <div className="mx-auto w-10 h-10 rounded-full bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-slate-400">
             <Info className="w-5 h-5" />
           </div>
           <div className="space-y-1">
             <h3 className="text-sm font-medium text-slate-200">No Projects Found</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              The Supabase <code className="font-mono text-slate-300">projects</code> table is currently empty or awaiting seed records.
+              The Supabase <code className="font-mono text-slate-300">projects</code> table is currently empty.
             </p>
           </div>
           <p className="text-xs text-slate-500 font-mono">
-            Run the sample INSERT statements from <code className="text-indigo-400">data/schema.sql</code> in your Supabase SQL Editor.
+            Run sample INSERT statements from <code className="text-indigo-400">data/schema.sql</code> in Supabase SQL Editor.
           </p>
         </div>
       ) : (
-        /* Projects List (preserved continuously across refreshes) */
+        /* Project Cards (Kept visible continuously across refreshes) */
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {projects.map((project) => (
             <div
               key={project.id}
-              className={`bg-[#0f172a] border border-slate-800 hover:border-slate-700 transition-all rounded-lg p-4 space-y-3 ${
-                isRefreshing ? 'opacity-85' : 'opacity-100'
-              }`}
+              className="bg-[#0f172a] border border-slate-800 hover:border-slate-700 transition-colors rounded-lg p-4 space-y-3"
             >
               <div className="flex items-start justify-between space-x-2">
                 <div className="flex items-center space-x-2 min-w-0">
@@ -132,7 +133,7 @@ export const ProjectsList: React.FC<ProjectsListProps> = ({
                 </div>
               </div>
 
-              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed break-words [overflow-wrap:anywhere]">
+              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed break-words">
                 {project.description || 'No description provided.'}
               </p>
 
