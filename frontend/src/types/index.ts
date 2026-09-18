@@ -18,20 +18,15 @@ export interface DatabaseHealthResponse {
   message: string;
 }
 
+export interface StatusCardInfo {
+  status: ConnectionState;
+  label: string;
+  details?: string;
+  isRefreshing?: boolean;
+}
+
 export interface SystemStatusState {
-  frontend: {
-    status: ConnectionState;
-    label: string;
-    details?: string;
-  };
-  backend: {
-    status: ConnectionState;
-    label: string;
-    details?: string;
-  };
-  database: {
-    status: ConnectionState;
-    label: string;
-    details?: string;
-  };
+  frontend: StatusCardInfo;
+  backend: StatusCardInfo;
+  database: StatusCardInfo;
 }

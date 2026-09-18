@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SystemStatus } from '../components/SystemStatus';
 import { ProjectsList } from '../components/ProjectsList';
 import { FutureInvestigationArea } from '../components/FutureInvestigationArea';
-import { checkBackendHealth, checkDatabaseHealth, fetchProjects } from '../services/api';
+import { checkBackendHealth, checkDatabaseHealth, fetchProjects, sanitizeErrorMessage } from '../services/api';
 import type { Project, SystemStatusState } from '../types';
 
 interface DashboardPageProps {
@@ -15,8 +15,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   setIsRefreshingHeader,
 }) => {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectsLoading, setProjectsLoading] = useState<boolean>(true);
+  const [isInitialProjectsLoading, setIsInitialProjectsLoading] = useState<boolean>(true);
+  const [isProjectsRefreshing, setIsProjectsRefreshing] = useState<boolean>(false);
+  const [isHealthRefreshing, setIsHealthRefreshing] = useState<boolean>(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectsWarning, setProjectsWarning] = useState<string | null>(null);
+
+  // Concurrency guard refs to prevent overlapping asynchronous requests
+  const hasInitializedRef = useRef<boolean>(false);
+  const isRefreshingHealthRef = useRef<boolean>(false);
+  const isRefreshingProjectsRef = useRef<boolean>(false);
+  const isRefreshingAllRef = useRef<boolean>(false);
+  const projectsRef = useRef<Project[]>([]);
+  projectsRef.current = projects;
 
   const [systemStatus, setSystemStatus] = useState<SystemStatusState>({
     frontend: {
@@ -37,16 +48,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   });
 
   const performHealthChecks = useCallback(async () => {
-    // 1. Frontend is always connected in an active browser session
-    setSystemStatus((prev) => ({
-      ...prev,
-      backend: { status: 'checking', label: 'Checking...', details: 'Probing GET /api/health...' },
-      database: { status: 'checking', label: 'Checking...', details: 'Probing database via backend...' },
-    }));
+    // Prevent overlapping health check requests
+    if (isRefreshingHealthRef.current) return;
+    isRefreshingHealthRef.current = true;
+    setIsHealthRefreshing(true);
+
+    // ONLY on initial page load do we transition cards to "Checking..."
+    // On subsequent refreshes, we preserve the current Connected/Disconnected cards
+    if (!hasInitializedRef.current) {
+      setSystemStatus((prev) => ({
+        ...prev,
+        backend: { status: 'checking', label: 'Checking...', details: 'Probing GET /api/health...' },
+        database: { status: 'checking', label: 'Checking...', details: 'Probing database via backend...' },
+      }));
+    }
 
     let backendOk = false;
 
-    // 2. Check Backend Health
+    // 1. Probe Backend
     try {
       const backendRes = await checkBackendHealth();
       backendOk = backendRes.status === 'ok';
@@ -59,12 +78,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         },
       }));
     } catch (err: any) {
+      const sanitized = sanitizeErrorMessage(err, 'Cannot reach FastAPI backend.');
       setSystemStatus((prev) => ({
         ...prev,
         backend: {
           status: 'disconnected',
           label: 'Disconnected',
-          details: err.message || 'Cannot reach FastAPI server',
+          details: sanitized,
         },
         database: {
           status: 'disconnected',
@@ -72,10 +92,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           details: 'Backend unreachable (database probe suspended)',
         },
       }));
+      isRefreshingHealthRef.current = false;
+      setIsHealthRefreshing(false);
+      hasInitializedRef.current = true;
       return;
     }
 
-    // 3. Check Database Health (only if backend is up)
+    // 2. Probe Database through Backend
     if (backendOk) {
       try {
         const dbRes = await checkDatabaseHealth();
@@ -89,35 +112,64 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           },
         }));
       } catch (err: any) {
+        const sanitized = sanitizeErrorMessage(err, 'Supabase PostgreSQL connection failed');
         setSystemStatus((prev) => ({
           ...prev,
           database: {
             status: 'disconnected',
             label: 'Disconnected',
-            details: err.message || 'Supabase PostgreSQL connection failed',
+            details: sanitized,
           },
         }));
       }
     }
+
+    isRefreshingHealthRef.current = false;
+    setIsHealthRefreshing(false);
+    hasInitializedRef.current = true;
   }, []);
 
   const loadProjects = useCallback(async () => {
-    setProjectsLoading(true);
-    setProjectsError(null);
+    // Prevent overlapping project fetch requests
+    if (isRefreshingProjectsRef.current) return;
+    isRefreshingProjectsRef.current = true;
+    setIsProjectsRefreshing(true);
+
     try {
       const data = await fetchProjects();
       setProjects(data);
+      setProjectsError(null);
+      setProjectsWarning(null);
     } catch (err: any) {
-      setProjectsError(err.message || 'Failed to load projects');
-      setProjects([]);
+      const sanitizedMsg = sanitizeErrorMessage(
+        err,
+        'Unable to refresh projects. Please try again.'
+      );
+
+      // If we already have valid projects loaded, preserve them and show non-blocking warning
+      if (projectsRef.current.length > 0) {
+        setProjectsWarning('Refresh failed. Showing last successfully loaded data.');
+        setProjectsError(null);
+      } else {
+        // If projects have never successfully loaded, show the large initial setup/error card
+        setProjectsError(sanitizedMsg);
+        setProjectsWarning(null);
+      }
     } finally {
-      setProjectsLoading(false);
+      setIsInitialProjectsLoading(false);
+      isRefreshingProjectsRef.current = false;
+      setIsProjectsRefreshing(false);
     }
   }, []);
 
   const refreshAll = useCallback(async () => {
+    if (isRefreshingAllRef.current) return;
+    isRefreshingAllRef.current = true;
     setIsRefreshingHeader(true);
+
     await Promise.allSettled([performHealthChecks(), loadProjects()]);
+
+    isRefreshingAllRef.current = false;
     setIsRefreshingHeader(false);
   }, [performHealthChecks, loadProjects, setIsRefreshingHeader]);
 
@@ -129,13 +181,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   return (
     <div className="space-y-8 pb-12">
       {/* Real-time System Status Section */}
-      <SystemStatus status={systemStatus} onRetry={performHealthChecks} />
+      <SystemStatus
+        status={systemStatus}
+        isRefreshing={isHealthRefreshing}
+        onRetry={performHealthChecks}
+      />
 
       {/* Projects Section */}
       <ProjectsList
         projects={projects}
-        isLoading={projectsLoading}
+        isInitialLoading={isInitialProjectsLoading}
+        isRefreshing={isProjectsRefreshing}
         error={projectsError}
+        warning={projectsWarning}
         onRefresh={loadProjects}
       />
 
