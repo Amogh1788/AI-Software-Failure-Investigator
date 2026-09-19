@@ -1,6 +1,6 @@
 # AI Software Failure Investigator
 
-> **Phase 1 — Foundation**  
+> **Phase 2 — Repository Ingestion & Codebase Analysis**  
 > AI-assisted software failure investigation and root-cause analysis platform.
 
 ---
@@ -18,11 +18,12 @@ Modern software ecosystems produce vast volumes of telemetry when incidents occu
 
 Through machine learning and LLM-powered root-cause analysis, the system will pinpoint regression sources, explain why failures occurred, and suggest remediation steps.
 
-> **Phase 1 Scope**: Establishes the core foundation, repository layout, developer dashboard, FastAPI backend service, and Supabase PostgreSQL data integration. No ML or LLM integration is included in this phase.
+> [!IMPORTANT]
+> **Phase 2 Scope & Boundary**: Phase 2 provides safe public GitHub repository ingestion, static codebase structure mapping, language detection, and recent Git history extraction. **Phase 2 does not perform AI/ML failure investigation yet.** Machine learning, LLM integration, bug localization, and automated remediation will be implemented in subsequent phases.
 
 ---
 
-## 2. Architecture
+## 2. Architecture & Data Flow
 
 The platform follows a clean, decoupled three-tier architecture:
 
@@ -30,6 +31,9 @@ The platform follows a clean, decoupled three-tier architecture:
 ┌─────────────────────────────────────────────────────────────┐
 │                 React 19 Frontend Dashboard                 │
 │              (Vite, TypeScript, Tailwind CSS)               │
+│   Components: Header, SystemStatus, ProjectsList,           │
+│               RepositoryAnalyzer, RepositorySummary,        │
+│               RepositoryFiles (Tree), RepositoryHistory     │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                        HTTP / REST APIs
@@ -37,22 +41,71 @@ The platform follows a clean, decoupled three-tier architecture:
 ┌──────────────────────────────▼──────────────────────────────┐
 │                    FastAPI Backend Server                   │
 │             (Uvicorn, Pydantic v2, Python 3.14)             │
-│   Endpoints: /api/health, /api/health/db, /api/projects     │
+│   Endpoints:                                                │
+│     • GET  /api/health                                      │
+│     • GET  /api/health/db                                   │
+│     • GET  /api/projects                                    │
+│     • POST /api/repositories/analyze                        │
+│     • GET  /api/repositories                                │
+│     • GET  /api/repositories/{id}                           │
+│     • GET  /api/repositories/{id}/files                     │
+│     • GET  /api/repositories/{id}/commits                   │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                        Supabase Python SDK
                                │
 ┌──────────────────────────────▼──────────────────────────────┐
 │                  Supabase PostgreSQL Database                │
-│                 (Table: projects, RLS Enabled)              │
+│   Tables:                                                   │
+│     • projects                                              │
+│     • repositories                                          │
+│     • repository_files                                      │
+│     • repository_commits                                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> **Security Guardrail**: The frontend *never* communicates directly with Supabase for data operations and never holds database secrets or service-role keys. All data access is gated through the FastAPI backend.
+---
+
+## 3. Supported Repositories & Ingestion Rules
+
+Phase 2 strictly ingests **public GitHub HTTPS repositories**.
+
+### Accepted Formats
+- `https://github.com/owner/repository`
+- `https://github.com/owner/repository.git`
+
+### Rejected Formats (HTTP 400)
+- SSH URLs (e.g. `git@github.com:owner/repo.git`)
+- Non-GitHub hosts (e.g. GitLab, Bitbucket, self-hosted Git)
+- Private repositories requiring credentials
+- Arbitrary non-HTTPS URLs or file paths (`file://`, `ftp://`)
+- Malformed URLs or directory traversal attempts
 
 ---
 
-## 3. Technology Stack
+## 4. Security Restrictions & Untrusted Input Policy
+
+Repository contents are treated as **untrusted input**:
+
+1. **Zero Code Execution**: The backend **never** executes scripts, binaries, or build commands from analyzed repositories. The following commands are strictly prohibited and never invoked:
+   - `npm install` / `npm run` / `yarn` / `pnpm`
+   - `pip install` / `python`
+   - `gradle` / `maven` / `make`
+   - Shell scripts, batch files, or compiled binaries
+2. **Static-Only Analysis**: Codebase inspection is performed strictly through static file tree walks, extension-to-language mapping, and safe text line counting.
+3. **Isolated Temporary Directories**: Clones are performed into isolated OS temporary directories (`tempfile.mkdtemp`), scanned, and immediately deleted via `shutil.rmtree` in a guaranteed `finally` block.
+4. **Hard Enforced Limits**:
+   - **Clone Timeout**: 60-second process termination.
+   - **Repository Size Limit**: 100 MB maximum on disk.
+   - **File Count Limit**: Maximum 10,000 files inspected per repository.
+   - **Individual File Size Limit**: Maximum 1 MB for line counting.
+   - **Commit Depth**: Shallow clone (`--depth 50`, `--single-branch`).
+5. **No Source Code Stored in Database**: Only file paths, extensions, languages, file sizes, and lines of code are stored in Supabase. Full source code contents and Git diffs are **never** stored in the database.
+6. **No Credentials Stored**: `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=""` are enforced during clones to reject private repos without prompting.
+
+---
+
+## 5. Technology Stack
 
 ### Frontend
 - **React 19** & **TypeScript**
@@ -62,145 +115,100 @@ The platform follows a clean, decoupled three-tier architecture:
 
 ### Backend
 - **Python 3.14+**
-- **FastAPI** (High-performance asynchronous REST API framework)
+- **FastAPI** (Asynchronous REST API framework)
 - **Uvicorn** (ASGI production server)
+- **GitPython** (Safe Git object inspection)
 - **Pydantic v2** & **pydantic-settings** (Typed validation and settings)
-- **Supabase Python SDK** (PostgreSQL database integration)
+- **Supabase Python SDK** (PostgreSQL database client)
 - **Pytest** & **HTTPX** (Automated endpoint test suite)
 
 ### Database
 - **Supabase PostgreSQL**
 - **Row Level Security (RLS)**
 
-### Version Control
-- **Git** & **GitHub**
-
 ---
 
-## 4. Project Structure
+## 6. Database Schema & Migrations
 
+### Phase 1 Schema: [`data/schema.sql`](data/schema.sql)
+Contains the core `projects` table.
+
+### Phase 2 Migration: [`data/phase2_migration.sql`](data/phase2_migration.sql)
+Run this migration in your Supabase SQL Editor to add Phase 2 tables:
+
+```sql
+-- 1. repositories table
+CREATE TABLE IF NOT EXISTS public.repositories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
+    github_url TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    default_branch TEXT,
+    description TEXT,
+    primary_language TEXT,
+    total_files INTEGER NOT NULL DEFAULT 0,
+    source_files INTEGER NOT NULL DEFAULT 0,
+    analyzed_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- 2. repository_files table
+CREATE TABLE IF NOT EXISTS public.repository_files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    repository_id UUID NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    extension TEXT,
+    language TEXT,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    lines_of_code INTEGER NOT NULL DEFAULT 0,
+    is_source_file BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- 3. repository_commits table
+CREATE TABLE IF NOT EXISTS public.repository_commits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    repository_id UUID NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
+    commit_hash TEXT NOT NULL,
+    author_name TEXT,
+    author_email TEXT,
+    commit_message TEXT,
+    committed_at TIMESTAMPTZ,
+    files_changed INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- 4. Indexes
+CREATE INDEX IF NOT EXISTS idx_repo_files_repo_id ON public.repository_files(repository_id);
+CREATE INDEX IF NOT EXISTS idx_repo_commits_repo_id ON public.repository_commits(repository_id);
+CREATE INDEX IF NOT EXISTS idx_repo_commits_hash ON public.repository_commits(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_repositories_owner_name ON public.repositories(owner, name);
 ```
-ai-software-failure-investigator/
-│
-├── frontend/                     # React + Vite + TypeScript frontend
-│   ├── src/
-│   │   ├── components/           # UI components
-│   │   │   ├── Header.tsx        # Developer tool header & refresh controls
-│   │   │   ├── SystemStatus.tsx  # Real-time health diagnostic cards
-│   │   │   ├── ProjectsList.tsx  # Project list & empty state
-│   │   │   └── FutureInvestigationArea.tsx # Engine pipeline preview
-│   │   ├── pages/
-│   │   │   └── DashboardPage.tsx # Main dashboard orchestrator
-│   │   ├── services/
-│   │   │   └── api.ts            # Typed frontend HTTP service layer
-│   │   ├── types/
-│   │   │   └── index.ts          # TypeScript interfaces & types
-│   │   ├── App.tsx               # Root component
-│   │   ├── main.tsx              # React DOM entrypoint
-│   │   └── index.css             # Tailwind CSS & base theme styles
-│   ├── index.html
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   └── .env.example
-│
-├── backend/                      # FastAPI Python backend service
-│   ├── app/
-│   │   ├── api/                  # API routers
-│   │   │   ├── health.py         # /api/health and /api/health/db endpoints
-│   │   │   └── projects.py       # /api/projects endpoint
-│   │   ├── core/                 # Configuration & database client
-│   │   │   ├── config.py         # Environment variables & CORS config
-│   │   │   └── database.py       # Supabase client & connectivity probe
-│   │   ├── models/               # Pydantic data models & schemas
-│   │   │   └── project.py        # Project and health response models
-│   │   ├── services/             # Business logic layer
-│   │   │   └── project_service.py# Supabase data retrieval & health probe
-│   │   └── main.py               # FastAPI application entrypoint
-│   ├── requirements.txt          # Python dependencies
-│   └── .env.example
-│
-├── tests/                        # Automated backend tests
-│   ├── test_health.py            # /api/health and /api/health/db tests
-│   └── test_projects.py          # /api/projects test cases
-│
-├── data/
-│   └── schema.sql                # Supabase table definitions & sample seed data
-│
-├── .env.example                  # Root environment template
-├── .gitignore                    # Comprehensive ignore rules
-├── README.md                     # Project documentation
-└── LICENSE                       # MIT License
-```
 
 ---
 
-## 5. Supabase Setup Guide
+## 7. REST API Endpoints
 
-Follow these steps to configure your Supabase PostgreSQL database:
-
-### Step 1: Create a Supabase Project
-1. Go to [supabase.com](https://supabase.com) and log in or sign up.
-2. Click **New Project**, specify an organization, enter a project name (e.g. `ai-software-failure-investigator`), and set a strong database password.
-3. Choose your preferred region and click **Create new project**.
-
-### Step 2: Create the `projects` Table
-1. In your Supabase project dashboard, navigate to the **SQL Editor** tab (left sidebar).
-2. Open the file [`data/schema.sql`](data/schema.sql) in this repository and copy its entire contents:
-   ```sql
-   CREATE TABLE IF NOT EXISTS public.projects (
-       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-       name TEXT NOT NULL,
-       description TEXT,
-       created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-   );
-
-   ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
-
-   CREATE POLICY "Allow public read access to projects"
-       ON public.projects FOR SELECT USING (true);
-
-   CREATE POLICY "Allow public insert access to projects"
-       ON public.projects FOR INSERT WITH CHECK (true);
-
-   -- Seed sample records
-   INSERT INTO public.projects (id, name, description, created_at)
-   VALUES 
-       ('a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d', 'checkout-service-incident-402', 'Investigation into intermittent 504 gateway timeouts in checkout pipeline.', now() - INTERVAL '2 days'),
-       ('b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e', 'auth-worker-memory-leak', 'Memory leak in OAuth JWT validation background worker.', now() - INTERVAL '6 hours')
-   ON CONFLICT (id) DO NOTHING;
-   ```
-3. Paste into the SQL Editor and click **Run**.
-4. Check the **Table Editor** to confirm the `projects` table and sample rows are visible.
-
-### Step 3: Obtain API Credentials
-1. In your Supabase dashboard, navigate to **Project Settings** (gear icon) -> **API**.
-2. Copy:
-   - **Project URL** (e.g., `https://xyzcompany.supabase.co`)
-   - **Project API Keys** -> `anon` / `public` key
-
-### Step 4: Configure Backend Environment
-1. Create a `backend/.env` file (copied from `backend/.env.example`):
-   ```bash
-   cp backend/.env.example backend/.env
-   ```
-2. Populate the keys:
-   ```env
-   SUPABASE_URL=https://xyzcompany.supabase.co
-   SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-   BACKEND_HOST=127.0.0.1
-   BACKEND_PORT=8000
-   CORS_ORIGINS=http://localhost:5173,http://localhost:3000
-   ```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Backend service health probe |
+| `GET` | `/api/health/db` | Database connectivity probe |
+| `GET` | `/api/projects` | List projects from Supabase |
+| `POST` | `/api/repositories/analyze` | Ingest and statically analyze a public GitHub repository |
+| `GET` | `/api/repositories` | List all analyzed repositories |
+| `GET` | `/api/repositories/{id}` | Get repository summary by UUID |
+| `GET` | `/api/repositories/{id}/files` | Get repository file metadata (tree) |
+| `GET` | `/api/repositories/{id}/commits` | Get repository recent commit history |
 
 ---
 
-## 6. Running Locally
+## 8. Running Locally
 
 ### Prerequisites
 - **Node.js** (v18+ recommended, v24 verified)
 - **Python** (v3.10+ recommended, v3.14 verified)
-- **Git**
+- **Git** (installed and available in system `PATH`)
 
 ---
 
@@ -211,36 +219,27 @@ Follow these steps to configure your Supabase PostgreSQL database:
    cd "c:\Users\Amogh\Desktop\AI Software Failure Investigator"
    ```
 
-2. **Create and activate a virtual environment**:
+2. **Activate the virtual environment**:
    - **Windows (PowerShell)**:
      ```powershell
-     python -m venv backend/.venv
      .\backend\.venv\Scripts\Activate.ps1
      ```
    - **macOS / Linux**:
      ```bash
-     python3 -m venv backend/.venv
      source backend/.venv/bin/activate
      ```
 
-3. **Install backend dependencies**:
+3. **Install dependencies**:
    ```bash
    pip install -r backend/requirements.txt
    ```
 
-4. **Configure environment variables**:
-   Create `backend/.env` as described in [Supabase Setup](#step-4-configure-backend-environment).
-
-5. **Start the FastAPI backend server**:
+4. **Start the FastAPI backend server**:
    ```bash
    python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
    ```
 
-6. **Verify Backend Status**:
-   - API Health: [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
-   - DB Health: [http://127.0.0.1:8000/api/health/db](http://127.0.0.1:8000/api/health/db)
-   - Projects: [http://127.0.0.1:8000/api/projects](http://127.0.0.1:8000/api/projects)
-   - Interactive Swagger Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+Interactive Swagger API docs are available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
 ---
 
@@ -256,55 +255,32 @@ Follow these steps to configure your Supabase PostgreSQL database:
    npm install
    ```
 
-3. **Configure environment variables**:
-   Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   Ensure it points to the FastAPI backend:
-   ```env
-   VITE_API_BASE_URL=http://localhost:8000/api
-   ```
-
-4. **Start the Vite development server**:
+3. **Start the Vite development server**:
    ```bash
    npm run dev
    ```
 
-5. **Open the Developer Dashboard**:
+4. **Open the Developer Dashboard**:
    Navigate to [http://localhost:5173](http://localhost:5173).
 
 ---
 
-## 7. Running Tests
+## 9. Running Tests
 
-Automated backend tests verify endpoint schemas, service boundaries, and graceful error handling when Supabase is disconnected.
-
-Run tests using pytest:
-```bash
-pytest tests/ -v
+Run the full automated test suite (Phase 1 + Phase 2):
+```powershell
+.\backend\.venv\Scripts\pytest.exe tests -v
 ```
 
-Verify frontend TypeScript typecheck and build:
-```bash
-cd frontend
-npm run build
+Verify frontend TypeScript compilation and production build:
+```powershell
+npm --prefix frontend run build
 ```
 
 ---
 
-## 8. Security Highlights
+## 10. Next Steps (Future Phases)
 
-- **Zero Secrets Committed**: `.gitignore` strictly excludes all `.env`, `.env.*`, keys, and credentials.
-- **Backend-Only Database Gateway**: The frontend never has direct access to Supabase or private database credentials.
-- **CORS Restricted**: Backend CORS is explicitly parameterized and restricted to known frontend origins.
-- **Row Level Security (RLS)**: Included in the SQL schema for PostgreSQL access control.
-
----
-
-## 9. Next Steps (Future Phases)
-
-- **Phase 2**: Ingestion pipeline for Git repositories (commits, diffs, blame) and issue trackers.
 - **Phase 3**: Telemetry parser for structured logs and multi-frame exception stack traces.
-- **Phase 4**: Root-cause analysis engine correlating logs with code diffs.
+- **Phase 4**: Root-cause analysis engine correlating logs with code diffs and commits.
 - **Phase 5**: Automated remediation suggestions and test generation.

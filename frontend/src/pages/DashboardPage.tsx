@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SystemStatus } from '../components/SystemStatus';
 import { ProjectsList } from '../components/ProjectsList';
+import { RepositoryAnalyzer } from '../components/RepositoryAnalyzer';
 import { FutureInvestigationArea } from '../components/FutureInvestigationArea';
 import { checkBackendHealth, checkDatabaseHealth, fetchProjects } from '../services/api';
 import type { Project, SystemStatusState } from '../types';
@@ -168,7 +169,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     } catch (err: any) {
       console.error('Projects refresh failed:', err);
       if (projectsRef.current.length > 0) {
-        // Keep existing projects visible and show small non-blocking alert
         setProjectsWarning('Unable to refresh projects. Showing previous data.');
       } else {
         const isTimeout = err?.name === 'AbortError';
@@ -215,6 +215,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         warning={projectsWarning}
         onRefresh={refreshProjects}
       />
+
+      {/* Phase 2: Repository Ingestion & Codebase Analysis */}
+      <RepositoryAnalyzer />
 
       {/* Future Investigation Engine Area */}
       <FutureInvestigationArea />

@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     SERVICE_NAME: str = "ai-software-failure-investigator"
     ENVIRONMENT: str = "development"
 
+    # Phase 2 Security & Resource Limits
+    MAX_REPO_SIZE_MB: int = 100
+    MAX_REPO_FILES: int = 10000
+    MAX_FILE_SIZE_BYTES: int = 1048576  # 1 MB
+    CLONE_TIMEOUT_SECONDS: int = 60
+    ANALYSIS_TIMEOUT_SECONDS: int = 60
+    MAX_COMMITS_TO_ANALYZE: int = 50
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
