@@ -12,6 +12,7 @@ import type {
   CreateInvestigationPayload,
   UpdateInvestigationPayload,
   CreateEvidencePayload,
+  InvestigationAnalysis,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -306,3 +307,59 @@ export async function deleteEvidence(investigationId: string, evidenceId: string
     throw new Error(errorMsg);
   }
 }
+
+// ====================================================================
+// Phase 4 — Investigation Intelligence Engine APIs
+// ====================================================================
+
+/**
+ * Execute Phase 4 analysis on a ready investigation.
+ */
+export async function analyzeInvestigation(investigationId: string): Promise<InvestigationAnalysis> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}/analyze`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    },
+    ANALYZE_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Investigation analysis failed');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch latest analysis results for an investigation.
+ */
+export async function getInvestigationAnalysis(investigationId: string): Promise<InvestigationAnalysis> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}/analysis`,
+    {},
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to fetch investigation analysis');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch all historical analysis runs for an investigation.
+ */
+export async function listAnalysisRuns(investigationId: string): Promise<InvestigationAnalysis[]> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}/analysis/runs`,
+    {},
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to fetch analysis runs');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+

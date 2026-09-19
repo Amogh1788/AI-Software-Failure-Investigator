@@ -89,7 +89,7 @@ export interface FileTreeNode {
 }
 
 // Phase 3 Investigation & Evidence Interfaces
-export type InvestigationStatus = 'draft' | 'ready';
+export type InvestigationStatus = 'draft' | 'ready' | 'analyzing' | 'completed';
 export type EvidenceType = 'bug_report' | 'application_log' | 'stack_trace' | 'test_output';
 
 export interface Investigation {
@@ -138,3 +138,69 @@ export interface CreateEvidencePayload {
   content: string;
   filename?: string | null;
 }
+
+// Phase 4 Investigation Intelligence Engine Interfaces
+export type EvidenceStrength = 'high' | 'moderate' | 'low';
+
+export interface CandidateSignals {
+  stack_trace_score: number;
+  test_failure_score: number;
+  logs_score: number;
+  bug_report_score: number;
+  git_recency_score: number;
+  final_score?: number;
+}
+
+export interface FailureCandidate {
+  file_path: string;
+  function_name?: string | null;
+  method_name?: string | null;
+  line_number?: number | null;
+  evidence_score: number;
+  evidence_strength: EvidenceStrength;
+  supporting_evidence: string[];
+  signals: CandidateSignals;
+}
+
+export interface FailureChainStep {
+  step_number: number;
+  phase: string;
+  title: string;
+  description: string;
+  source: string;
+  location?: string | null;
+}
+
+export interface RelevantCommit {
+  commit_hash: string;
+  author_name?: string | null;
+  committed_at?: string | null;
+  commit_message: string;
+  relevance_reason: string;
+}
+
+export interface EvidenceSignalsSummary {
+  stack_trace_signal: number;
+  test_failure_signal: number;
+  logs_tfidf_signal: number;
+  bug_report_tfidf_signal: number;
+  git_history_signal: number;
+  score_formula: string;
+  score_disclaimer: string;
+}
+
+export interface InvestigationAnalysis {
+  id: string;
+  investigation_id: string;
+  engine_version: string;
+  status: string;
+  summary: string;
+  failure_chain: FailureChainStep[];
+  ranked_candidates: FailureCandidate[];
+  relevant_commits: RelevantCommit[];
+  evidence_signals: EvidenceSignalsSummary;
+  run_duration_ms: number;
+  created_at: string;
+}
+
+

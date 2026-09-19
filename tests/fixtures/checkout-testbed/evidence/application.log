@@ -1,0 +1,8 @@
+2026-09-19 14:15:02.102 [http-nio-8080-exec-4] INFO  com.example.checkout.CheckoutController - Received checkout request for customer cust_123 with promo FLASHSALE
+2026-09-19 14:15:02.108 [http-nio-8080-exec-4] DEBUG com.example.checkout.CheckoutService - Processing checkout for customer cust_123 with subtotal 100.00
+2026-09-19 14:15:02.112 [http-nio-8080-exec-4] DEBUG com.example.checkout.CheckoutService - Applying discount code FLASHSALE
+2026-09-19 14:15:02.115 [http-nio-8080-exec-4] ERROR com.example.checkout.CheckoutController - Checkout failed with unhandled exception: paymentTotal cannot be null for payment processing
+java.lang.NullPointerException: paymentTotal cannot be null for payment processing
+	at com.example.checkout.PaymentRequestBuilder.setAmount(PaymentRequestBuilder.java:18)
+	at com.example.checkout.CheckoutService.processCheckout(CheckoutService.java:21)
+	at com.example.checkout.CheckoutController.handleCheckout(CheckoutController.java:8)

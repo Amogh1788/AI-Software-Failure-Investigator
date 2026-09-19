@@ -1,0 +1,14 @@
+-------------------------------------------------------
+ T E S T S
+-------------------------------------------------------
+Running com.example.checkout.CheckoutServiceTest
+[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 0.045 s <<< FAILURE! - in com.example.checkout.CheckoutServiceTest
+[ERROR] testProcessCheckoutWithFlashSaleDiscount  Time elapsed: 0.021 s  <<< ERROR!
+java.lang.NullPointerException: paymentTotal cannot be null for payment processing
+	at com.example.checkout.PaymentRequestBuilder.setAmount(PaymentRequestBuilder.java:18)
+	at com.example.checkout.CheckoutService.processCheckout(CheckoutService.java:21)
+	at com.example.checkout.CheckoutServiceTest.testProcessCheckoutWithFlashSaleDiscount(CheckoutServiceTest.java:12)
+
+Results:
+Tests run: 1, Failures: 0, Errors: 1, Skipped: 0
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.1.2:test (default-test) on project checkout-service: There are test failures.

@@ -7,6 +7,8 @@ from app.models.repository import RepositoryResponse
 class InvestigationStatus(str, Enum):
     DRAFT = "draft"
     READY = "ready"
+    ANALYZING = "analyzing"
+    COMPLETED = "completed"
 
 
 class EvidenceType(str, Enum):

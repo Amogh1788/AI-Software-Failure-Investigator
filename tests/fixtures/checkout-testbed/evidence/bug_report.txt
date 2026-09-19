@@ -1,0 +1,13 @@
+Bug Report: Checkout returns 500 when FLASHSALE discount code is applied
+Description:
+Users report that when applying the FLASHSALE promo code during checkout,
+the checkout service crashes with HTTP 500 error.
+The payment pipeline fails during checkout processing with paymentTotal becoming null.
+Steps to reproduce:
+1. Add items to cart with subtotal $100.00.
+2. Enter discount promo code 'FLASHSALE'.
+3. Click 'Complete Purchase'.
+Observed:
+Internal Server Error: NullPointerException in PaymentRequestBuilder setAmount.
+Expected:
+Checkout should succeed with discount applied.

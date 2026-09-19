@@ -13,21 +13,27 @@ import {
   FileText,
   Terminal,
   FileCode,
+  Play,
+  RotateCw,
 } from 'lucide-react';
 import type {
   InvestigationDetail as IDetail,
   EvidenceType,
   CreateEvidencePayload,
   InvestigationStatus,
+  InvestigationAnalysis,
 } from '../types';
 import {
   getInvestigation,
   updateInvestigation,
   addEvidence,
   deleteEvidence,
+  analyzeInvestigation,
+  getInvestigationAnalysis,
 } from '../services/api';
 import { EvidencePanel } from './EvidencePanel';
 import { EvidenceEditor } from './EvidenceEditor';
+import { AnalysisReportView } from './AnalysisReportView';
 
 interface InvestigationDetailProps {
   investigationId: string;
@@ -54,6 +60,8 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
   const [showEditor, setShowEditor] = useState(false);
   const [editorDefaultType, setEditorDefaultType] = useState<EvidenceType>('bug_report');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [analysis, setAnalysis] = useState<InvestigationAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const loadData = async () => {
     try {
@@ -61,6 +69,15 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
       setError(null);
       const data = await getInvestigation(investigationId);
       setDetail(data);
+
+      // Attempt to load latest analysis run
+      try {
+        const analysisData = await getInvestigationAnalysis(investigationId);
+        setAnalysis(analysisData);
+      } catch {
+        // No analysis run yet
+        setAnalysis(null);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load investigation details');
     } finally {
@@ -74,8 +91,9 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
 
   const handleStatusToggle = async () => {
     if (!detail) return;
+    const currentStatus = detail.investigation.status;
     const nextStatus: InvestigationStatus =
-      detail.investigation.status === 'ready' ? 'draft' : 'ready';
+      currentStatus === 'ready' || currentStatus === 'completed' ? 'draft' : 'ready';
 
     setIsUpdatingStatus(true);
     setStatusMessage(null);
@@ -93,6 +111,26 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
       setError(err instanceof Error ? err.message : 'Failed to update status');
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleRunAnalysis = async () => {
+    setIsAnalyzing(true);
+    setError(null);
+    setStatusMessage(null);
+
+    try {
+      const result = await analyzeInvestigation(investigationId);
+      setAnalysis(result);
+      const refreshedDetail = await getInvestigation(investigationId);
+      setDetail(refreshedDetail);
+      onUpdated?.();
+      setStatusMessage('Investigation analysis completed successfully.');
+      setTimeout(() => setStatusMessage(null), 4000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Investigation analysis failed');
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -144,6 +182,8 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
 
   const { investigation, repository, evidence } = detail;
   const isReady = investigation.status === 'ready';
+  const isCompleted = investigation.status === 'completed';
+  const isAnalyzingStatus = investigation.status === 'analyzing' || isAnalyzing;
 
   // Check which of the 4 required categories are covered
   const coveredTypes = new Set(evidence.map((e) => e.evidence_type));
@@ -158,16 +198,27 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
             <h2 className="text-base font-semibold text-slate-100 font-sans tracking-tight">
               {investigation.title}
             </h2>
-            <span
-              className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase ${
-                isReady
-                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                  : 'bg-amber-950 text-amber-400 border border-amber-800'
-              }`}
-            >
-              {isReady ? <CheckCircle2 className="w-3.5 h-3.5" /> : <FileEdit className="w-3.5 h-3.5" />}
-              <span>{investigation.status}</span>
-            </span>
+            {isCompleted ? (
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase bg-purple-950 text-purple-400 border border-purple-800">
+                <CheckCircle2 className="w-3.5 h-3.5 text-purple-400" />
+                <span>Completed</span>
+              </span>
+            ) : isAnalyzingStatus ? (
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase bg-indigo-950 text-indigo-400 border border-indigo-800">
+                <span className="inline-block w-3 h-3 border border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <span>Analyzing</span>
+              </span>
+            ) : isReady ? (
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase bg-emerald-950 text-emerald-400 border border-emerald-800">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Ready</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase bg-amber-950 text-amber-400 border border-amber-800">
+                <FileEdit className="w-3.5 h-3.5" />
+                <span>Draft</span>
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
@@ -197,24 +248,51 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
         </div>
 
         <div className="flex items-center space-x-2 shrink-0">
+          {/* Run / Re-run Engine Button */}
+          {(isReady || isCompleted) && (
+            <button
+              onClick={handleRunAnalysis}
+              disabled={isAnalyzingStatus}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white transition-colors cursor-pointer disabled:cursor-not-allowed shadow-sm"
+              title={isCompleted ? "Re-run investigation intelligence engine" : "Run investigation intelligence engine"}
+            >
+              {isAnalyzingStatus ? (
+                <>
+                  <span className="inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Analyzing...</span>
+                </>
+              ) : isCompleted ? (
+                <>
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span>Re-run Engine</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Run Engine</span>
+                </>
+              )}
+            </button>
+          )}
+
           {/* Status Toggle Button */}
           <button
             onClick={handleStatusToggle}
-            disabled={isUpdatingStatus}
+            disabled={isUpdatingStatus || isAnalyzingStatus}
             className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono transition-colors border cursor-pointer disabled:cursor-not-allowed ${
-              isReady
+              isReady || isCompleted
                 ? 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
                 : 'bg-emerald-950/80 text-emerald-300 border-emerald-800 hover:bg-emerald-900'
             }`}
             title={
-              !isReady && !isAllFourCovered
+              !isReady && !isCompleted && !isAllFourCovered
                 ? 'All 4 evidence categories required to mark ready'
                 : undefined
             }
           >
             {isUpdatingStatus ? (
               <span className="inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-            ) : isReady ? (
+            ) : isReady || isCompleted ? (
               <>
                 <FileEdit className="w-3.5 h-3.5 text-amber-400" />
                 <span>Switch to Draft</span>
@@ -322,20 +400,58 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
         onAddClick={handleOpenEditor}
       />
 
-      {/* Future Phase 4 Placeholder */}
-      <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-4 flex items-start space-x-3 text-xs text-slate-400">
-        <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-indigo-400 shrink-0">
-          <Cpu className="w-4 h-4" />
-        </div>
-        <div className="space-y-1">
-          <span className="font-semibold font-mono text-slate-200 uppercase tracking-wide">
-            AI Investigation Engine — Coming in Phase 4
-          </span>
-          <p className="leading-relaxed text-slate-400">
-            Once failure evidence is collected and the case is marked <strong className="text-emerald-400">Ready</strong>, Phase 4 will ingest these ground-truth artifacts (bug report, runtime logs, stack traces, and test output) to conduct multi-source root-cause analysis.
+      {/* Phase 4 Investigation Intelligence Engine Section */}
+      {isAnalyzingStatus ? (
+        <div className="bg-slate-900/60 border border-indigo-500/30 rounded-lg p-8 text-center space-y-3">
+          <span className="inline-block w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          <h4 className="text-sm font-semibold text-indigo-300 font-mono">
+            Running Phase 4 Investigation Intelligence Engine v1.0.0
+          </h4>
+          <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed font-mono">
+            Performing explainable multi-source correlation: parsing stack traces, correlating failing test outputs, matching error log tokens, scoring commit recency, and ranking suspect files.
           </p>
         </div>
-      </div>
+      ) : analysis ? (
+        <div className="border-t border-slate-800 pt-6">
+          <AnalysisReportView
+            analysis={analysis}
+            onReanalyze={handleRunAnalysis}
+            isAnalyzing={isAnalyzingStatus}
+          />
+        </div>
+      ) : isReady ? (
+        <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900 to-indigo-950/40 border border-indigo-800/50 rounded-lg p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="space-y-1 text-left">
+            <span className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-indigo-400 uppercase tracking-wide">
+              <Cpu className="w-4 h-4" /> Ready for Investigation Intelligence
+            </span>
+            <p className="text-xs text-slate-300">
+              All 4 failure evidence categories are attached. Run the deterministic intelligence engine to localize suspect defect files and synthesize a step-by-step causal failure chain.
+            </p>
+          </div>
+          <button
+            onClick={handleRunAnalysis}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-mono font-semibold transition shrink-0 shadow-md cursor-pointer"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Run Investigation Engine</span>
+          </button>
+        </div>
+      ) : (
+        <div className="bg-slate-900/40 border border-slate-800/80 rounded-lg p-4 flex items-start space-x-3 text-xs text-slate-400">
+          <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-indigo-400 shrink-0">
+            <Cpu className="w-4 h-4" />
+          </div>
+          <div className="space-y-1">
+            <span className="font-semibold font-mono text-slate-200 uppercase tracking-wide">
+              Phase 4 — Investigation Intelligence Engine
+            </span>
+            <p className="leading-relaxed text-slate-400">
+              To run the intelligence engine, attach evidence for all 4 required categories (bug report, runtime logs, stack traces, and test output) and switch the case status to <strong className="text-emerald-400">Ready</strong>.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

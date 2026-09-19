@@ -1,0 +1,5 @@
+java.lang.NullPointerException: paymentTotal cannot be null for payment processing
+	at com.example.checkout.PaymentRequestBuilder.setAmount(PaymentRequestBuilder.java:18)
+	at com.example.checkout.CheckoutService.processCheckout(CheckoutService.java:21)
+	at com.example.checkout.CheckoutService.applyDiscount(CheckoutService.java:31)
+	at com.example.checkout.CheckoutController.handleCheckout(CheckoutController.java:8)

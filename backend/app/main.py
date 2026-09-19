@@ -8,8 +8,8 @@ from app.api.investigations import router as investigations_router
 
 app = FastAPI(
     title="AI Software Failure Investigator API",
-    description="Backend API service for AI Software Failure Investigator - Phase 3 Failure Evidence Collection",
-    version="0.3.0",
+    description="Backend API service for AI Software Failure Investigator - Phase 4 Investigation Intelligence Engine v1",
+    version="0.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -35,7 +35,7 @@ def root():
     """Root endpoint providing service metadata."""
     return {
         "service": settings.SERVICE_NAME,
-        "version": "0.3.0",
+        "version": "0.4.0",
         "docs": "/docs",
         "endpoints": {
             "health": "/api/health",
