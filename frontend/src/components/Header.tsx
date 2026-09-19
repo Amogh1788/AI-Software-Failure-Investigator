@@ -20,7 +20,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
                 AI Software Failure Investigator
               </h1>
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono uppercase font-semibold bg-indigo-950/80 text-indigo-400 border border-indigo-800/60 whitespace-nowrap">
-                Phase 1 Foundation
+                PHASE 2 — REPOSITORY ANALYSIS
               </span>
             </div>
             <p className="text-xs text-slate-400 truncate">
