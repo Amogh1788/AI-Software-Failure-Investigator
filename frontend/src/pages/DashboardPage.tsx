@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SystemStatus } from '../components/SystemStatus';
 import { ProjectsList } from '../components/ProjectsList';
 import { RepositoryAnalyzer } from '../components/RepositoryAnalyzer';
+import { InvestigationManager } from '../components/InvestigationManager';
 import { FutureInvestigationArea } from '../components/FutureInvestigationArea';
 import { checkBackendHealth, checkDatabaseHealth, fetchProjects } from '../services/api';
 import type { Project, SystemStatusState } from '../types';
@@ -218,6 +219,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* Phase 2: Repository Ingestion & Codebase Analysis */}
       <RepositoryAnalyzer />
+
+      {/* Phase 3: Investigation Cases & Failure Evidence Collection */}
+      <InvestigationManager />
 
       {/* Future Investigation Engine Area */}
       <FutureInvestigationArea />

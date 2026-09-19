@@ -200,10 +200,49 @@ CREATE INDEX IF NOT EXISTS idx_repositories_owner_name ON public.repositories(ow
 | `GET` | `/api/repositories/{id}` | Get repository summary by UUID |
 | `GET` | `/api/repositories/{id}/files` | Get repository file metadata (tree) |
 | `GET` | `/api/repositories/{id}/commits` | Get repository recent commit history |
+| `POST` | `/api/investigations` | Create a new investigation case linked to a repository |
+| `GET` | `/api/investigations` | List all investigation cases with evidence counts |
+| `GET` | `/api/investigations/{id}` | Retrieve full investigation details, repository, and evidence |
+| `PATCH` | `/api/investigations/{id}` | Update title, description, or status ('draft' / 'ready') |
+| `DELETE` | `/api/investigations/{id}` | Delete investigation case and cascade delete attached evidence |
+| `POST` | `/api/investigations/{id}/evidence` | Attach failure evidence (enforces category size limits) |
+| `GET` | `/api/investigations/{id}/evidence` | List all evidence items for an investigation |
+| `DELETE` | `/api/investigations/{id}/evidence/{evidence_id}` | Delete an individual evidence item |
 
 ---
 
-## 8. Running Locally
+## 8. Phase 3 — Failure Evidence Collection
+
+> [!IMPORTANT]
+> **Phase 3 collects and structures failure evidence. AI/ML investigation is not implemented yet.**
+
+### 8.1 Investigation Cases
+An **Investigation Case** represents a single failure incident tied to an analyzed GitHub repository. Cases begin in `draft` status and transition to `ready` once all necessary ground-truth failure artifacts are assembled.
+
+### 8.2 Failure Evidence Categories & Hard Limits
+Evidence payloads are strictly validated, sized, and stored passively without execution:
+
+| Evidence Type | Purpose | Size Limit | Typography |
+|---|---|---|---|
+| `bug_report` | Issue description, steps to reproduce, environment details | 50 KB | Standard |
+| `application_log` | Telemetry, stdout/stderr streams, timestamped events | 500 KB | Monospaced |
+| `stack_trace` | Exception hierarchies, call paths, stack frames | 200 KB | Monospaced |
+| `test_output` | Test runner logs, failed assertions, execution diffs | 200 KB | Monospaced |
+
+Oversized inputs exceeding these byte limits are rejected immediately with HTTP 413 (Content Too Large).
+
+### 8.3 Ready Status Validation
+The backend prevents premature analysis by enforcing that an investigation **cannot** transition from `draft` to `ready` status unless **all four evidence categories** (`bug_report`, `application_log`, `stack_trace`, `test_output`) have been attached. Attempting to mark a case `ready` with missing evidence yields HTTP 409 (Conflict).
+
+### 8.4 Security & RLS Model
+1. **Private RLS Protection**: Row Level Security is enabled on both `investigations` and `investigation_evidence` with **zero public/anon policies**.
+2. **Server-Side Mediation**: All CRUD operations are executed exclusively through the FastAPI backend utilizing `SUPABASE_SERVICE_ROLE_KEY`.
+3. **Frontend Isolation**: The React frontend does not bundle the Supabase SDK, holds no Supabase URLs or secrets, and routes all operations through the `/api/investigations` REST API.
+4. **Untrusted Content Safety**: Evidence payloads are stored as passive text data and are never parsed as executable scripts or executed in any shell.
+
+---
+
+## 9. Running Locally
 
 ### Prerequisites
 - **Node.js** (v18+ recommended, v24 verified)
@@ -212,31 +251,27 @@ CREATE INDEX IF NOT EXISTS idx_repositories_owner_name ON public.repositories(ow
 
 ---
 
+### Database Migrations (Supabase SQL Editor)
+Run the migration scripts in order:
+1. `data/schema.sql` (Phase 1 foundation)
+2. `data/phase2_migration.sql` (Phase 2 repositories)
+3. `data/phase3_migration.sql` (Phase 3 investigations & evidence)
+
+---
+
 ### Backend Setup & Startup
 
-1. **Navigate to the repository root**:
+1. **Install dependencies**:
    ```bash
-   cd "c:\Users\Amogh\Desktop\AI Software Failure Investigator"
+   py -m pip install -r backend/requirements.txt
    ```
 
-2. **Activate the virtual environment**:
-   - **Windows (PowerShell)**:
-     ```powershell
-     .\backend\.venv\Scripts\Activate.ps1
-     ```
-   - **macOS / Linux**:
-     ```bash
-     source backend/.venv/bin/activate
-     ```
+2. **Configure environment**:
+   Ensure `backend/.env` has `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
 
-3. **Install dependencies**:
+3. **Start the FastAPI backend server**:
    ```bash
-   pip install -r backend/requirements.txt
-   ```
-
-4. **Start the FastAPI backend server**:
-   ```bash
-   python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
+   py -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
    ```
 
 Interactive Swagger API docs are available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
@@ -245,31 +280,26 @@ Interactive Swagger API docs are available at [http://127.0.0.1:8000/docs](http:
 
 ### Frontend Setup & Startup
 
-1. **Navigate to the frontend directory**:
+1. **Install frontend dependencies**:
    ```bash
-   cd frontend
+   npm --prefix frontend install
    ```
 
-2. **Install frontend dependencies**:
+2. **Start Vite development server**:
    ```bash
-   npm install
+   npm --prefix frontend run dev
    ```
 
-3. **Start the Vite development server**:
-   ```bash
-   npm run dev
-   ```
-
-4. **Open the Developer Dashboard**:
+3. **Open Developer Dashboard**:
    Navigate to [http://localhost:5173](http://localhost:5173).
 
 ---
 
-## 9. Running Tests
+## 10. Running Tests
 
-Run the full automated test suite (Phase 1 + Phase 2):
+Run the full automated test suite (32 tests covering Phase 1, Phase 2, and Phase 3):
 ```powershell
-.\backend\.venv\Scripts\pytest.exe tests -v
+py -m pytest tests/ -v
 ```
 
 Verify frontend TypeScript compilation and production build:
@@ -279,8 +309,7 @@ npm --prefix frontend run build
 
 ---
 
-## 10. Next Steps (Future Phases)
+## 11. Next Steps (Future Phases)
 
-- **Phase 3**: Telemetry parser for structured logs and multi-frame exception stack traces.
-- **Phase 4**: Root-cause analysis engine correlating logs with code diffs and commits.
-- **Phase 5**: Automated remediation suggestions and test generation.
+- **Phase 4**: Multi-modal root-cause analysis engine correlating logs and stack traces with repository AST diffs.
+- **Phase 5**: Automated patch generation, regression testing, and failure verification.

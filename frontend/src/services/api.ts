@@ -6,6 +6,12 @@ import type {
   RepositoryFile,
   RepositoryCommit,
   RepositoryDetail,
+  Investigation,
+  InvestigationEvidence,
+  InvestigationDetail,
+  CreateInvestigationPayload,
+  UpdateInvestigationPayload,
+  CreateEvidencePayload,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -161,4 +167,142 @@ export async function getRepositoryCommits(repositoryId: string): Promise<Reposi
     throw new Error(errorMsg);
   }
   return response.json();
+}
+
+// ==========================================
+// Phase 3 Investigation & Evidence API Endpoints
+// ==========================================
+
+const EVIDENCE_TIMEOUT_MS = 15000; // 15s for larger logs/traces
+
+/**
+ * Create a new investigation case linked to an analyzed repository.
+ */
+export async function createInvestigation(payload: CreateInvestigationPayload): Promise<Investigation> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to create investigation');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch all investigation cases with evidence counts.
+ */
+export async function getInvestigations(): Promise<Investigation[]> {
+  const response = await fetchWithTimeout(`${API_BASE_URL}/investigations`);
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to fetch investigations');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch details of a specific investigation, including repository and attached evidence.
+ */
+export async function getInvestigation(investigationId: string): Promise<InvestigationDetail> {
+  const response = await fetchWithTimeout(`${API_BASE_URL}/investigations/${investigationId}`);
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to fetch investigation details');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Update title, description, or status of an investigation.
+ */
+export async function updateInvestigation(
+  investigationId: string,
+  payload: UpdateInvestigationPayload
+): Promise<Investigation> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to update investigation');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Delete an investigation case and its attached evidence.
+ */
+export async function deleteInvestigation(investigationId: string): Promise<void> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}`,
+    { method: 'DELETE' },
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to delete investigation');
+    throw new Error(errorMsg);
+  }
+}
+
+/**
+ * Attach failure evidence to an investigation case.
+ */
+export async function addEvidence(
+  investigationId: string,
+  payload: CreateEvidencePayload
+): Promise<InvestigationEvidence> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}/evidence`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    EVIDENCE_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to attach evidence');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch all evidence items for an investigation.
+ */
+export async function getInvestigationEvidence(investigationId: string): Promise<InvestigationEvidence[]> {
+  const response = await fetchWithTimeout(`${API_BASE_URL}/investigations/${investigationId}/evidence`);
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to fetch evidence items');
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
+
+/**
+ * Delete a single evidence item.
+ */
+export async function deleteEvidence(investigationId: string, evidenceId: string): Promise<void> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}/evidence/${evidenceId}`,
+    { method: 'DELETE' },
+    DEFAULT_TIMEOUT_MS
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to delete evidence item');
+    throw new Error(errorMsg);
+  }
 }

@@ -11,6 +11,10 @@ _supabase_client: Optional[Client] = None
 _last_url: str = ""
 _last_key: str = ""
 
+_service_role_client: Optional[Client] = None
+_last_service_url: str = ""
+_last_service_key: str = ""
+
 
 def get_supabase_client() -> Optional[Client]:
     """Retrieve or dynamically initialize the Supabase client."""
@@ -54,12 +58,51 @@ def get_supabase_client() -> Optional[Client]:
         return None
 
 
+def get_service_role_client() -> Optional[Client]:
+    """
+    Retrieve or dynamically initialize the dedicated server-side Supabase client.
+    STRICT SECURITY REQUIREMENT:
+    Phase 3 private investigation operations MUST use SUPABASE_SERVICE_ROLE_KEY.
+    Does NOT fall back to SUPABASE_ANON_KEY.
+    """
+    global _service_role_client, _last_service_url, _last_service_key
+
+    load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
+    load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
+
+    url = (os.getenv("SUPABASE_URL") or settings.SUPABASE_URL or "").strip()
+    service_role_key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or settings.SUPABASE_SERVICE_ROLE_KEY
+        or ""
+    ).strip()
+
+    if _service_role_client is not None and url == _last_service_url and service_role_key == _last_service_key:
+        return _service_role_client
+
+    if not url or not service_role_key or "your-project" in url or "your-service-role-key" in service_role_key:
+        return None
+
+    try:
+        _service_role_client = create_client(url, service_role_key)
+        _last_service_url = url
+        _last_service_key = service_role_key
+        logger.info(f"Supabase service-role client initialized for private operations.")
+        return _service_role_client
+    except Exception as exc:
+        logger.error(f"Failed to initialize Supabase service-role client: {exc}")
+        return None
+
+
 def reset_supabase_client():
     """Reset the client state."""
-    global _supabase_client, _last_url, _last_key
+    global _supabase_client, _last_url, _last_key, _service_role_client, _last_service_url, _last_service_key
     _supabase_client = None
     _last_url = ""
     _last_key = ""
+    _service_role_client = None
+    _last_service_url = ""
+    _last_service_key = ""
 
 
 def check_database_connection() -> Tuple[bool, str]:

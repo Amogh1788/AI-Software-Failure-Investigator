@@ -4,11 +4,12 @@ from app.core.config import settings
 from app.api.health import router as health_router
 from app.api.projects import router as projects_router
 from app.api.repositories import router as repositories_router
+from app.api.investigations import router as investigations_router
 
 app = FastAPI(
     title="AI Software Failure Investigator API",
-    description="Backend API service for AI Software Failure Investigator - Phase 2 Repository Ingestion & Codebase Analysis",
-    version="0.2.0",
+    description="Backend API service for AI Software Failure Investigator - Phase 3 Failure Evidence Collection",
+    version="0.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -26,6 +27,7 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 app.include_router(repositories_router, prefix="/api")
+app.include_router(investigations_router, prefix="/api")
 
 
 @app.get("/", tags=["Root"])
@@ -33,7 +35,7 @@ def root():
     """Root endpoint providing service metadata."""
     return {
         "service": settings.SERVICE_NAME,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "docs": "/docs",
         "endpoints": {
             "health": "/api/health",
@@ -41,6 +43,7 @@ def root():
             "projects": "/api/projects",
             "repositories": "/api/repositories",
             "repositories_analyze": "/api/repositories/analyze",
+            "investigations": "/api/investigations",
         },
     }
 

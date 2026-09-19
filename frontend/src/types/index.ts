@@ -85,3 +85,54 @@ export interface FileTreeNode {
   children?: FileTreeNode[];
   file?: RepositoryFile;
 }
+
+// Phase 3 Investigation & Evidence Interfaces
+export type InvestigationStatus = 'draft' | 'ready';
+export type EvidenceType = 'bug_report' | 'application_log' | 'stack_trace' | 'test_output';
+
+export interface Investigation {
+  id: string;
+  repository_id: string;
+  title: string;
+  description: string | null;
+  status: InvestigationStatus;
+  evidence_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestigationEvidence {
+  id: string;
+  investigation_id: string;
+  evidence_type: EvidenceType;
+  title: string | null;
+  content: string;
+  filename: string | null;
+  byte_size: number;
+  created_at: string;
+}
+
+export interface InvestigationDetail {
+  investigation: Investigation;
+  repository: Repository | null;
+  evidence: InvestigationEvidence[];
+}
+
+export interface CreateInvestigationPayload {
+  repository_id: string;
+  title: string;
+  description?: string | null;
+}
+
+export interface UpdateInvestigationPayload {
+  title?: string;
+  description?: string | null;
+  status?: InvestigationStatus;
+}
+
+export interface CreateEvidencePayload {
+  evidence_type: EvidenceType;
+  title?: string | null;
+  content: string;
+  filename?: string | null;
+}

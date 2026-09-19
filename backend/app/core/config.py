@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     ANALYSIS_TIMEOUT_SECONDS: int = 60
     MAX_COMMITS_TO_ANALYZE: int = 50
 
+    # Phase 3 Failure Evidence Size Limits (bytes)
+    MAX_EVIDENCE_BUG_REPORT_BYTES: int = 51200      # 50 KB
+    MAX_EVIDENCE_APP_LOGS_BYTES: int = 512000       # 500 KB
+    MAX_EVIDENCE_STACK_TRACE_BYTES: int = 204800    # 200 KB
+    MAX_EVIDENCE_TEST_OUTPUT_BYTES: int = 204800    # 200 KB
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
