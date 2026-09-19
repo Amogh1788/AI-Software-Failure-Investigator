@@ -21,13 +21,20 @@ def get_supabase_client() -> Optional[Client]:
     load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
 
     url = (os.getenv("SUPABASE_URL") or settings.SUPABASE_URL or "").strip()
-    key = (
-        os.getenv("SUPABASE_ANON_KEY")
-        or settings.SUPABASE_ANON_KEY
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    service_role_key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         or settings.SUPABASE_SERVICE_ROLE_KEY
         or ""
     ).strip()
+    anon_key = (
+        os.getenv("SUPABASE_ANON_KEY")
+        or settings.SUPABASE_ANON_KEY
+        or ""
+    ).strip()
+
+    # Prioritize privileged service-role key if provided; otherwise fall back to anon key
+    key = service_role_key or anon_key
+    key_type = "service-role (privileged)" if service_role_key else "anon (publishable)"
 
     # If already created with same credentials, return existing client
     if _supabase_client is not None and url == _last_url and key == _last_key:
@@ -40,7 +47,7 @@ def get_supabase_client() -> Optional[Client]:
         _supabase_client = create_client(url, key)
         _last_url = url
         _last_key = key
-        logger.info(f"Supabase client successfully initialized for {url}.")
+        logger.info(f"Supabase client successfully initialized for {url} using {key_type} key.")
         return _supabase_client
     except Exception as exc:
         logger.error(f"Failed to initialize Supabase client: {exc}")
@@ -62,7 +69,7 @@ def check_database_connection() -> Tuple[bool, str]:
     """
     client = get_supabase_client()
     if not client:
-        return False, "Supabase client not initialized (missing or invalid SUPABASE_URL / SUPABASE_ANON_KEY in backend/.env)."
+        return False, "Supabase client not initialized (missing or invalid SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY in backend/.env)."
 
     try:
         # Perform a lightweight query against the projects table
