@@ -373,3 +373,77 @@ def test_delete_evidence_item():
     with patch("app.services.evidence_service.get_service_role_client", return_value=mock_db):
         resp = client.delete(f"/api/investigations/{MOCK_INV_ID}/evidence/{MOCK_EVID_ID}")
         assert resp.status_code == 204
+
+
+# 6. Repository Status Schema Consistency & Fallback Tests
+def test_create_investigation_with_status_column_missing_in_database_fallback():
+    """
+    Verify that if the database has not yet been migrated with phase3_repository_schema_fix.sql
+    and throws PostgreSQL 42703 (column repositories.status does not exist), the backend
+    gracefully catches it and falls back to verifying existence via id.
+    """
+    mock_db = MagicMock()
+
+    # When select("id, status") is called, simulate PostgreSQL code 42703 error
+    def select_side_effect(cols):
+        query = MagicMock()
+        if cols == "id, status":
+            query.eq.return_value.execute.side_effect = Exception(
+                "{'code': '42703', 'message': 'column repositories.status does not exist'}"
+            )
+        elif cols == "id":
+            query.eq.return_value.execute.return_value.data = [{"id": MOCK_REPO_ID}]
+        return query
+
+    mock_repo_table = MagicMock()
+    mock_repo_table.select.side_effect = select_side_effect
+
+    mock_inv_query = MagicMock()
+    mock_inv_query.insert.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_INV_ID,
+            "repository_id": MOCK_REPO_ID,
+            "title": "Fallback Handled Case",
+            "description": None,
+            "status": "draft",
+            "created_at": "2026-09-19T14:40:00Z",
+            "updated_at": "2026-09-19T14:40:00Z",
+        }
+    ]
+
+    def table_side_effect(table_name):
+        if table_name == "repositories":
+            return mock_repo_table
+        elif table_name == "investigations":
+            return mock_inv_query
+        return MagicMock()
+
+    mock_db.table.side_effect = table_side_effect
+
+    with patch("app.services.investigation_service.get_service_role_client", return_value=mock_db):
+        resp = client.post(
+            "/api/investigations",
+            json={
+                "repository_id": MOCK_REPO_ID,
+                "title": "Fallback Handled Case",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == MOCK_INV_ID
+        assert data["status"] == "draft"
+
+
+def test_schema_fix_migration_sql_validity():
+    """Verify that data/phase3_repository_schema_fix.sql contains the required idempotent ALTER TABLE statements."""
+    fix_path = Path(__file__).resolve().parent.parent / "data" / "phase3_repository_schema_fix.sql"
+    assert fix_path.exists(), "phase3_repository_schema_fix.sql must exist"
+
+    sql = fix_path.read_text(encoding="utf-8")
+    assert "ALTER TABLE public.repositories" in sql
+    assert "ADD COLUMN IF NOT EXISTS status TEXT" in sql
+    assert "ADD COLUMN IF NOT EXISTS error_message TEXT" in sql
+    assert "UPDATE public.repositories" in sql
+    assert "SET status = 'analyzed'" in sql
+    assert "repositories_status_check" in sql
+    assert "CHECK (status IN ('analyzed', 'pending', 'failed', 'error'))" in sql

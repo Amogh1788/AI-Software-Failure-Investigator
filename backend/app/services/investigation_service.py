@@ -50,12 +50,29 @@ class InvestigationService:
 
         # 1. Validate repository association
         try:
-            repo_res = (
-                client.table("repositories")
-                .select("id, status")
-                .eq("id", request.repository_id)
-                .execute()
-            )
+            try:
+                repo_res = (
+                    client.table("repositories")
+                    .select("id, status")
+                    .eq("id", request.repository_id)
+                    .execute()
+                )
+            except Exception as select_exc:
+                err_str = str(select_exc)
+                if "42703" in err_str or "status does not exist" in err_str:
+                    logger.warning(
+                        "Column 'repositories.status' does not yet exist in the database. "
+                        "Falling back to 'id' lookup. Apply data/phase3_repository_schema_fix.sql."
+                    )
+                    repo_res = (
+                        client.table("repositories")
+                        .select("id")
+                        .eq("id", request.repository_id)
+                        .execute()
+                    )
+                else:
+                    raise select_exc
+
             if not repo_res.data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

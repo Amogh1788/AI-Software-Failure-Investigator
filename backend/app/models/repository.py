@@ -18,6 +18,8 @@ class RepositoryResponse(BaseModel):
     primary_language: Optional[str] = Field(None, description="Detected primary programming language")
     total_files: int = Field(0, description="Total number of analyzed files")
     source_files: int = Field(0, description="Total number of identified source code files")
+    status: str = Field("analyzed", description="Repository analysis status ('analyzed', 'pending', 'failed', 'error')")
+    error_message: Optional[str] = Field(None, description="Error message if analysis failed")
     analyzed_at: str = Field(..., description="Timestamp when analysis was conducted")
     created_at: str = Field(..., description="Timestamp of record creation")
 

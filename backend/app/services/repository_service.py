@@ -68,6 +68,8 @@ class RepositoryService:
                 "primary_language": analysis_results["primary_language"],
                 "total_files": analysis_results["total_files"],
                 "source_files": analysis_results["source_files"],
+                "status": "analyzed",
+                "error_message": None,
                 "analyzed_at": now_iso,
             }
 

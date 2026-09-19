@@ -43,6 +43,8 @@ export interface Repository {
   primary_language: string | null;
   total_files: number;
   source_files: number;
+  status?: string;
+  error_message?: string | null;
   analyzed_at: string;
   created_at: string;
 }

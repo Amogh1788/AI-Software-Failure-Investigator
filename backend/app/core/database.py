@@ -24,16 +24,16 @@ def get_supabase_client() -> Optional[Client]:
     load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
     load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
 
-    url = (os.getenv("SUPABASE_URL") or settings.SUPABASE_URL or "").strip()
+    url = (os.getenv("SUPABASE_URL") if "SUPABASE_URL" in os.environ else settings.SUPABASE_URL or "").strip()
     service_role_key = (
         os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or settings.SUPABASE_SERVICE_ROLE_KEY
-        or ""
+        if "SUPABASE_SERVICE_ROLE_KEY" in os.environ
+        else settings.SUPABASE_SERVICE_ROLE_KEY or ""
     ).strip()
     anon_key = (
         os.getenv("SUPABASE_ANON_KEY")
-        or settings.SUPABASE_ANON_KEY
-        or ""
+        if "SUPABASE_ANON_KEY" in os.environ
+        else settings.SUPABASE_ANON_KEY or ""
     ).strip()
 
     # Prioritize privileged service-role key if provided; otherwise fall back to anon key
@@ -70,11 +70,11 @@ def get_service_role_client() -> Optional[Client]:
     load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
     load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
 
-    url = (os.getenv("SUPABASE_URL") or settings.SUPABASE_URL or "").strip()
+    url = (os.getenv("SUPABASE_URL") if "SUPABASE_URL" in os.environ else settings.SUPABASE_URL or "").strip()
     service_role_key = (
         os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or settings.SUPABASE_SERVICE_ROLE_KEY
-        or ""
+        if "SUPABASE_SERVICE_ROLE_KEY" in os.environ
+        else settings.SUPABASE_SERVICE_ROLE_KEY or ""
     ).strip()
 
     if _service_role_client is not None and url == _last_service_url and service_role_key == _last_service_key:
