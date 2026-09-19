@@ -3,19 +3,19 @@ import { SystemStatus } from '../components/SystemStatus';
 import { ProjectsList } from '../components/ProjectsList';
 import { FutureInvestigationArea } from '../components/FutureInvestigationArea';
 import { checkBackendHealth, checkDatabaseHealth, fetchProjects } from '../services/api';
-import type { Project, SystemStatusState, StatusCardInfo } from '../types';
+import type { Project, SystemStatusState } from '../types';
 
 interface DashboardPageProps {
   registerRefresh: (fn: () => void) => void;
-  setIsRefreshingHeader: (val: boolean) => void;
+  onProjectsRefreshingChange?: (isRefreshing: boolean) => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   registerRefresh,
-  setIsRefreshingHeader,
+  onProjectsRefreshingChange,
 }) => {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [isProjectsLoading, setIsProjectsLoading] = useState<boolean>(true);
+  const [isProjectsInitialLoading, setIsProjectsInitialLoading] = useState<boolean>(true);
   const [isProjectsRefreshing, setIsProjectsRefreshing] = useState<boolean>(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [projectsWarning, setProjectsWarning] = useState<string | null>(null);
@@ -39,113 +39,163 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     },
   });
 
-  // Guard refs to prevent duplicate/overlapping requests
+  // Guard refs to prevent duplicate requests
   const isRefreshingProjectsRef = useRef<boolean>(false);
   const isCheckingConnectivityRef = useRef<boolean>(false);
-  const projectsCountRef = useRef<number>(0);
-  projectsCountRef.current = projects.length;
+  const projectsRef = useRef<Project[]>([]);
+  projectsRef.current = projects;
 
   /**
-   * Check Backend and Database connectivity in parallel.
-   * Only this function updates the backend/database cards to Checking... state.
+   * Probe Backend Health independently with 5s timeout.
+   */
+  const checkBackend = async () => {
+    setSystemStatus((prev) => ({
+      ...prev,
+      backend: { status: 'checking', label: 'Checking...', details: 'Connecting to FastAPI...' },
+    }));
+
+    try {
+      const res = await checkBackendHealth();
+      if (res.status === 'ok') {
+        setSystemStatus((prev) => ({
+          ...prev,
+          backend: {
+            status: 'connected',
+            label: 'Connected',
+            details: `Service: ${res.service} (HTTP 200)`,
+          },
+        }));
+      } else {
+        setSystemStatus((prev) => ({
+          ...prev,
+          backend: {
+            status: 'disconnected',
+            label: 'Disconnected',
+            details: 'Backend returned unexpected status',
+          },
+        }));
+      }
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError';
+      setSystemStatus((prev) => ({
+        ...prev,
+        backend: {
+          status: 'disconnected',
+          label: 'Disconnected',
+          details: isTimeout ? 'Connection timed out (5s)' : 'Cannot reach FastAPI backend server',
+        },
+      }));
+    }
+  };
+
+  /**
+   * Probe Database Health independently with 5s timeout.
+   */
+  const checkDatabase = async () => {
+    setSystemStatus((prev) => ({
+      ...prev,
+      database: { status: 'checking', label: 'Checking...', details: 'Verifying Supabase PostgreSQL...' },
+    }));
+
+    try {
+      const res = await checkDatabaseHealth();
+      if (res.status === 'connected') {
+        setSystemStatus((prev) => ({
+          ...prev,
+          database: {
+            status: 'connected',
+            label: 'Connected',
+            details: res.message || 'Supabase PostgreSQL connected',
+          },
+        }));
+      } else {
+        setSystemStatus((prev) => ({
+          ...prev,
+          database: {
+            status: 'disconnected',
+            label: 'Disconnected',
+            details: res.message || 'Database disconnected',
+          },
+        }));
+      }
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError';
+      setSystemStatus((prev) => ({
+        ...prev,
+        database: {
+          status: 'disconnected',
+          label: 'Disconnected',
+          details: isTimeout ? 'Connection timed out (5s)' : 'Database connection check failed',
+        },
+      }));
+    }
+  };
+
+  /**
+   * Dedicated connectivity check (Backend + Database in parallel).
+   * Only this action modifies Backend and Database status cards.
    */
   const checkConnectivity = useCallback(async () => {
     if (isCheckingConnectivityRef.current) return;
     isCheckingConnectivityRef.current = true;
     setIsCheckingConnectivity(true);
 
-    setSystemStatus((prev) => ({
-      ...prev,
-      backend: { status: 'checking', label: 'Checking...', details: 'Probing GET /api/health...' },
-      database: { status: 'checking', label: 'Checking...', details: 'Probing GET /api/health/db...' },
-    }));
-
-    // Run health checks in parallel
-    const [backendResult, dbResult] = await Promise.allSettled([
-      checkBackendHealth(),
-      checkDatabaseHealth(),
-    ]);
-
-    let newBackendState: StatusCardInfo;
-    if (backendResult.status === 'fulfilled' && backendResult.value.status === 'ok') {
-      newBackendState = {
-        status: 'connected',
-        label: 'Connected',
-        details: `Service: ${backendResult.value.service} (HTTP 200)`,
-      };
-    } else {
-      newBackendState = {
-        status: 'disconnected',
-        label: 'Disconnected',
-        details: 'Cannot connect to FastAPI backend server',
-      };
+    try {
+      await Promise.allSettled([checkBackend(), checkDatabase()]);
+    } finally {
+      isCheckingConnectivityRef.current = false;
+      setIsCheckingConnectivity(false);
     }
-
-    let newDbState: StatusCardInfo;
-    if (dbResult.status === 'fulfilled' && dbResult.value.status === 'connected') {
-      newDbState = {
-        status: 'connected',
-        label: 'Connected',
-        details: dbResult.value.message || 'Supabase PostgreSQL connected',
-      };
-    } else {
-      const reason =
-        dbResult.status === 'fulfilled'
-          ? dbResult.value.message
-          : 'Database connection failed';
-      newDbState = {
-        status: 'disconnected',
-        label: 'Disconnected',
-        details: reason,
-      };
-    }
-
-    setSystemStatus((prev) => ({
-      ...prev,
-      backend: newBackendState,
-      database: newDbState,
-    }));
-
-    isCheckingConnectivityRef.current = false;
-    setIsCheckingConnectivity(false);
   }, []);
 
   /**
    * Refresh projects only (GET /api/projects).
-   * Does NOT touch backend/database status cards or set them to Checking.
-   * Keeps existing project list visible while updating.
+   * Does NOT touch backend or database status.
+   * Does NOT activate global loading state.
+   * Guaranteed to clear loading state in finally.
    */
   const refreshProjects = useCallback(async () => {
     if (isRefreshingProjectsRef.current) return;
     isRefreshingProjectsRef.current = true;
     setIsProjectsRefreshing(true);
-    setIsRefreshingHeader(true);
+    onProjectsRefreshingChange?.(true);
 
     try {
       const data = await fetchProjects();
       setProjects(data);
       setProjectsError(null);
       setProjectsWarning(null);
-    } catch {
-      // If previous project data exists, keep it visible and show small non-blocking message
-      if (projectsCountRef.current > 0) {
+    } catch (err: any) {
+      console.error('Projects refresh failed:', err);
+      if (projectsRef.current.length > 0) {
+        // Keep existing projects visible and show small non-blocking alert
         setProjectsWarning('Unable to refresh projects. Showing previous data.');
       } else {
-        setProjectsError('Unable to retrieve projects from backend.');
+        const isTimeout = err?.name === 'AbortError';
+        setProjectsError(
+          isTimeout
+            ? 'Request timed out (5s). Ensure FastAPI is running on port 8000.'
+            : 'Unable to retrieve projects from backend.'
+        );
       }
     } finally {
-      setIsProjectsLoading(false);
+      setIsProjectsInitialLoading(false);
       isRefreshingProjectsRef.current = false;
       setIsProjectsRefreshing(false);
-      setIsRefreshingHeader(false);
+      onProjectsRefreshingChange?.(false);
     }
-  }, [setIsRefreshingHeader]);
+  }, [onProjectsRefreshingChange]);
 
-  // Initial load: run connectivity checks and project fetch in parallel
+  // Keep registered refresh callback updated without re-running mount requests
   useEffect(() => {
     registerRefresh(refreshProjects);
+  }, [registerRefresh, refreshProjects]);
+
+  // Run on first load only: connectivity and projects in parallel
+  useEffect(() => {
     Promise.allSettled([checkConnectivity(), refreshProjects()]);
-  }, [registerRefresh, checkConnectivity, refreshProjects]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-8 pb-12">
@@ -159,7 +209,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* Projects Section */}
       <ProjectsList
         projects={projects}
-        isInitialLoading={isProjectsLoading}
+        isInitialLoading={isProjectsInitialLoading}
         isRefreshing={isProjectsRefreshing}
         error={projectsError}
         warning={projectsWarning}
