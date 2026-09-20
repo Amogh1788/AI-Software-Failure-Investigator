@@ -222,7 +222,17 @@ export async function getInvestigations(): Promise<Investigation[]> {
  * Fetch details of a specific investigation, including repository and attached evidence.
  */
 export async function getInvestigation(investigationId: string): Promise<InvestigationDetail> {
-  const response = await fetchWithTimeout(`${API_BASE_URL}/investigations/${investigationId}`);
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations/${investigationId}`,
+    {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+    },
+    DEFAULT_TIMEOUT_MS
+  );
   if (!response.ok) {
     const errorMsg = await extractErrorDetail(response, 'Failed to fetch investigation details');
     throw new Error(errorMsg);
@@ -347,7 +357,13 @@ export async function analyzeInvestigation(investigationId: string): Promise<Inv
 export async function getInvestigationAnalysis(investigationId: string): Promise<InvestigationAnalysis> {
   const response = await fetchWithTimeout(
     `${API_BASE_URL}/investigations/${investigationId}/analysis`,
-    {},
+    {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+    },
     DEFAULT_TIMEOUT_MS
   );
   if (!response.ok) {

@@ -215,6 +215,17 @@ def test_intelligence_engine_evaluation_fixture_recall(temp_checkout_repo):
     assert len(test_commits) > 0, "Expected test commit in relevant commits"
     assert "Regression-detection/testing commit" in test_commits[0].relevance_reason
 
+    # Verify older baseline commits are NOT classified as regression-introducing commits
+    baseline_commits = [
+        c for c in commits
+        if "add checkout service implementation" in c.commit_message
+        or "initial payment request builder" in c.commit_message
+    ]
+    for c in baseline_commits:
+        assert "Likely regression-introducing commit" not in c.relevance_reason
+        assert "regression-introducing" not in c.relevance_reason.lower()
+        assert "Baseline setup commit" in c.relevance_reason
+
 
 # ====================================================================
 # 2. HTTP 409 Guard on Draft Investigation
@@ -471,3 +482,492 @@ def test_get_latest_analysis_not_found():
 
     assert response.status_code == 404
     assert "No analysis results found" in response.json()["detail"]
+
+
+# ====================================================================
+# 6. Deterministic Testbed Commit Causal Correlation
+# ====================================================================
+
+def test_git_causal_commit_correlation_deterministic_testbed():
+    """
+    Validate causal commit correlation against deterministic testbed ground truth:
+    - b3a44a0 = likely regression-introducing commit
+    - b2e8572 = regression-detection/testing commit
+    - d7993bd and 24705a6 are NOT classified as the regression-introducing commit.
+    - b3a44a0 ranks above d7993bd and 24705a6.
+    """
+    from app.models.analysis import FailureCandidate, EvidenceStrength, CandidateSignals
+
+    mock_candidates = [
+        FailureCandidate(
+            file_path="src/CheckoutService.java",
+            function_name="applyDiscount",
+            line_number=31,
+            evidence_score=0.95,
+            evidence_strength=EvidenceStrength.HIGH,
+            supporting_evidence=["Stack trace at CheckoutService.java:31"],
+            signals=CandidateSignals(
+                stack_trace_score=1.0,
+                test_failure_score=0.9,
+                logs_score=0.8,
+                bug_report_score=0.7,
+                git_recency_score=0.8,
+                final_score=0.95,
+            ),
+        )
+    ]
+    mock_stack_frames = [
+        {
+            "filename": "CheckoutService.java",
+            "class_name": "com.example.checkout.CheckoutService",
+            "function_name": "applyDiscount",
+            "line_number": 31,
+        }
+    ]
+
+    # Mock diffs
+    mock_diff_test = MagicMock()
+    mock_diff_test.b_path = "tests/CheckoutServiceTest.java"
+    mock_diff_test.a_path = "tests/CheckoutServiceTest.java"
+    mock_diff_test.new_file = True
+    mock_diff_test.deleted_file = False
+    mock_diff_test.diff = b"@@ -0,0 +1,15 @@\n+package com.example.checkout;\n+public class CheckoutServiceTest {}\n"
+
+    mock_diff_flashsale = MagicMock()
+    mock_diff_flashsale.b_path = "src/CheckoutService.java"
+    mock_diff_flashsale.a_path = "src/CheckoutService.java"
+    mock_diff_flashsale.new_file = False
+    mock_diff_flashsale.deleted_file = False
+    mock_diff_flashsale.diff = (
+        b"@@ -27,6 +27,9 @@ public BigDecimal applyDiscount(String discountCode, BigDecimal subtotal) {\n"
+        b"-        if (\"DISCOUNT50\".equalsIgnoreCase(discountCode)) return subtotal.multiply(new BigDecimal(\"0.50\"));\n"
+        b"+        if (\"DISCOUNT50\".equalsIgnoreCase(discountCode)) {\n"
+        b"+            return subtotal.multiply(new BigDecimal(\"0.50\"));\n"
+        b"+        } else if (\"FLASHSALE\".equalsIgnoreCase(discountCode)) {\n"
+        b"+            // Regression: returns null on promo tier\n"
+        b"+            return null;\n"
+        b"+        }\n"
+    )
+
+    mock_diff_initial_cs = MagicMock()
+    mock_diff_initial_cs.b_path = "src/CheckoutService.java"
+    mock_diff_initial_cs.a_path = "src/CheckoutService.java"
+    mock_diff_initial_cs.new_file = True
+    mock_diff_initial_cs.deleted_file = False
+    mock_diff_initial_cs.diff = b"@@ -0,0 +1,8 @@\n+package com.example.checkout;\n"
+
+    mock_diff_root = MagicMock()
+    mock_diff_root.b_path = "src/PaymentRequestBuilder.java"
+    mock_diff_root.a_path = "src/PaymentRequestBuilder.java"
+    mock_diff_root.new_file = True
+    mock_diff_root.deleted_file = False
+    mock_diff_root.diff = b"@@ -0,0 +1,10 @@\n+package com.example.checkout;\n"
+
+    # Commit objects (newest to oldest)
+    c_test = MagicMock()
+    c_test.hexsha = "b2e8572abcdef123"
+    c_test.message = "test: add unit test for checkout service"
+    c_test.stats.files = {"tests/CheckoutServiceTest.java": {}}
+    c_test.parents = [MagicMock()]
+    c_test.parents[0].diff.return_value = [mock_diff_test]
+
+    c_flashsale = MagicMock()
+    c_flashsale.hexsha = "b3a44a0abcdef123"
+    c_flashsale.message = "refactor(checkout): add FLASHSALE discount promo tier"
+    c_flashsale.stats.files = {"src/CheckoutService.java": {}}
+    c_flashsale.parents = [MagicMock()]
+    c_flashsale.parents[0].diff.return_value = [mock_diff_flashsale]
+
+    c_base_cs = MagicMock()
+    c_base_cs.hexsha = "d7993bdabcdef123"
+    c_base_cs.message = "feat(checkout): add checkout service implementation"
+    c_base_cs.stats.files = {"src/CheckoutService.java": {}}
+    c_base_cs.parents = [MagicMock()]
+    c_base_cs.parents[0].diff.return_value = [mock_diff_initial_cs]
+
+    c_root = MagicMock()
+    c_root.hexsha = "24705a6abcdef123"
+    c_root.message = "feat(checkout): initial payment request builder and controller setup"
+    c_root.stats.files = {"src/PaymentRequestBuilder.java": {}}
+    c_root.parents = []
+    c_root.diff.return_value = [mock_diff_root]
+
+    mock_repo = MagicMock()
+    mock_repo.iter_commits.return_value = [c_test, c_flashsale, c_base_cs, c_root]
+
+    bug_report = "Checkout returns 500 when FLASHSALE discount code applied. paymentTotal null."
+    logs = "Applying discount code FLASHSALE. paymentTotal cannot be null."
+    test_output = "CheckoutServiceTest testProcessCheckoutWithFlashSaleDiscount FAILED"
+
+    relevant_commits = IntelligenceEngine._correlate_git_commits(
+        repo=mock_repo,
+        candidates=mock_candidates,
+        stack_frames=mock_stack_frames,
+        bug_report=bug_report,
+        logs=logs,
+        test_output=test_output,
+    )
+
+    commit_map = {c.commit_hash[:7]: c for c in relevant_commits}
+
+    # 1. b3a44a0 = likely regression-introducing commit
+    assert "b3a44a0" in commit_map, "Expected b3a44a0 in relevant commits"
+    assert "Likely regression-introducing commit" in commit_map["b3a44a0"].relevance_reason
+
+    # 2. b2e8572 = regression-detection/testing commit
+    assert "b2e8572" in commit_map, "Expected b2e8572 in relevant commits"
+    assert "Regression-detection/testing commit" in commit_map["b2e8572"].relevance_reason
+
+    # 3. d7993bd and 24705a6 are not classified as regression-introducing commit
+    if "d7993bd" in commit_map:
+        assert "Likely regression-introducing commit" not in commit_map["d7993bd"].relevance_reason
+        assert "regression-introducing" not in commit_map["d7993bd"].relevance_reason.lower()
+    if "24705a6" in commit_map:
+        assert "Likely regression-introducing commit" not in commit_map["24705a6"].relevance_reason
+        assert "regression-introducing" not in commit_map["24705a6"].relevance_reason.lower()
+
+    # 4. b3a44a0 must rank above d7993bd and 24705a6
+    hashes = [c.commit_hash[:7] for c in relevant_commits]
+    assert hashes.index("b3a44a0") == 0, f"Expected b3a44a0 to rank #1, got: {hashes}"
+
+
+# ====================================================================
+# 8. API Integration Test: Live Remote Commit Structure
+# ====================================================================
+
+def test_analyze_api_with_live_remote_commit_structure():
+    """
+    Integration test exercising the actual POST /api/investigations/{id}/analyze API endpoint
+    with the exact commit structure matching the live remote repository:
+    https://github.com/Amogh1788/AI-SFI-Checkout-Testbed
+
+    Ground truth:
+    - b3a44a0 refactor(checkout): add FLASHSALE discount promo tier -> Likely regression-introducing commit (#1)
+    - b2e8572 test: add unit test for checkout service -> Regression-detection/testing commit
+    - d7993bd feat: add checkout service and payment pipeline -> Baseline setup commit
+    - 24705a6 feat: initial payment and controller setup -> Baseline setup commit
+    """
+    mock_db = MagicMock()
+
+    # 1. Investigation query returning status = 'ready'
+    mock_inv_query = MagicMock()
+    mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_INV_ID,
+            "repository_id": MOCK_REPO_ID,
+            "title": "Live Remote Testbed Case",
+            "status": "ready",
+        }
+    ]
+
+    # 2. Repository query
+    mock_repo_query = MagicMock()
+    mock_repo_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_REPO_ID,
+            "github_url": "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed",
+            "clone_url": "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed",
+            "default_branch": "main",
+        }
+    ]
+
+    # 3. Evidence mock
+    evidence_dir = FIXTURE_PATH / "evidence"
+    evidence_data = [
+        {"id": "1", "investigation_id": MOCK_INV_ID, "evidence_type": "bug_report", "title": "Report", "content": (evidence_dir / "bug_report.txt").read_text(), "filename": "bug_report.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "2", "investigation_id": MOCK_INV_ID, "evidence_type": "application_log", "title": "Logs", "content": (evidence_dir / "application.log").read_text(), "filename": "application.log", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "3", "investigation_id": MOCK_INV_ID, "evidence_type": "stack_trace", "title": "Trace", "content": (evidence_dir / "stack_trace.txt").read_text(), "filename": "stack_trace.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "4", "investigation_id": MOCK_INV_ID, "evidence_type": "test_output", "title": "Test", "content": (evidence_dir / "test_output.txt").read_text(), "filename": "test_output.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+    ]
+    mock_evid_query = MagicMock()
+    mock_evid_query.select.return_value.eq.return_value.order.return_value.execute.return_value.data = evidence_data
+
+    # 4. Runs insert query
+    inserted_runs = []
+    mock_runs_query = MagicMock()
+    def handle_run_insert(rec):
+        run_record = {
+            "id": MOCK_RUN_ID,
+            "investigation_id": MOCK_INV_ID,
+            "engine_version": "1.0.0",
+            "status": "completed",
+            "summary": rec.get("summary", ""),
+            "failure_chain": rec.get("failure_chain", []),
+            "ranked_candidates": rec.get("ranked_candidates", []),
+            "relevant_commits": rec.get("relevant_commits", []),
+            "evidence_signals": rec.get("evidence_signals", {}),
+            "run_duration_ms": rec.get("run_duration_ms", 100),
+            "created_at": "2026-09-19T14:30:00Z",
+        }
+        inserted_runs.append(run_record)
+        return MagicMock(execute=MagicMock(return_value=MagicMock(data=[run_record])))
+
+    mock_runs_query.insert.side_effect = handle_run_insert
+
+    # Status update tracking
+    mock_update = MagicMock()
+    mock_update.execute.return_value.data = [{"id": MOCK_INV_ID}]
+    mock_inv_query.update.return_value.eq.return_value = mock_update
+
+    mock_db.table.side_effect = lambda table: {
+        "investigations": mock_inv_query,
+        "repositories": mock_repo_query,
+        "investigation_evidence": mock_evid_query,
+        "investigation_runs": mock_runs_query,
+    }.get(table, MagicMock())
+
+    # Build exact mock commits as found in remote testbed
+    # Commit 1 (newest): 6d5ff2d - test
+    c1 = MagicMock()
+    c1.hexsha = "6d5ff2db974b"
+    c1.message = "test: add unit test for checkout service"
+    c1.stats.files = {"tests/CheckoutServiceTest.java": {}}
+    mock_d1 = MagicMock()
+    mock_d1.b_path = "tests/CheckoutServiceTest.java"
+    mock_d1.a_path = "tests/CheckoutServiceTest.java"
+    mock_d1.new_file = False
+    mock_d1.diff = b"@@ -1,5 +1,15 @@\n+@Test\n+public void testFlashSale() {}\n"
+    c1.parents = [MagicMock()]
+    c1.parents[0].diff.return_value = [mock_d1]
+
+    # Commit 2: 875bcf7 - refactor(checkout): add FLASHSALE discount promo tier (non-empty diff modifying CheckoutService.java)
+    c2 = MagicMock()
+    c2.hexsha = "875bcf7a1786"
+    c2.message = "refactor(checkout): add FLASHSALE discount promo tier"
+    c2.stats.files = {"src/CheckoutService.java": {}}
+    mock_d2 = MagicMock()
+    mock_d2.b_path = "src/CheckoutService.java"
+    mock_d2.a_path = "src/CheckoutService.java"
+    mock_d2.new_file = False
+    mock_d2.diff = (
+        b"@@ -25,2 +26,5 @@\n"
+        b"+ } else if (\"FLASHSALE\".equalsIgnoreCase(discountCode)) {\n"
+        b"+     return null;\n"
+        b"+ }\n"
+    )
+    c2.parents = [MagicMock()]
+    c2.parents[0].diff.return_value = [mock_d2]
+
+    # Commit 3: 2a2701b - feat: add checkout service and payment pipeline
+    c3 = MagicMock()
+    c3.hexsha = "2a2701b0d6cb"
+    c3.message = "feat: add checkout service and payment pipeline"
+    c3.stats.files = {"src/CheckoutService.java": {}}
+    mock_d3 = MagicMock()
+    mock_d3.b_path = "src/CheckoutService.java"
+    mock_d3.a_path = "src/CheckoutService.java"
+    mock_d3.new_file = True
+    mock_d3.diff = b"@@ -0,0 +1,30 @@\n+package com.example.checkout;\n"
+    c3.parents = [MagicMock()]
+    c3.parents[0].diff.return_value = [mock_d3]
+
+    # Commit 4: 24705a6 - feat: initial payment and controller setup
+    c4 = MagicMock()
+    c4.hexsha = "24705a6faca0"
+    c4.message = "feat: initial payment and controller setup"
+    c4.stats.files = {"src/CheckoutController.java": {}, "src/PaymentRequestBuilder.java": {}}
+    mock_d4 = MagicMock()
+    mock_d4.b_path = "src/CheckoutController.java"
+    mock_d4.a_path = "src/CheckoutController.java"
+    mock_d4.new_file = True
+    mock_d4.diff = b"@@ -0,0 +1,20 @@\n+package com.example.checkout;\n"
+    c4.parents = []
+    c4.diff.return_value = [mock_d4]
+
+    mock_git_repo = MagicMock()
+    mock_git_repo.iter_commits.return_value = [c1, c2, c3, c4]
+
+    with patch("app.services.analysis_service.get_service_role_client", return_value=mock_db), \
+         patch("app.services.evidence_service.get_service_role_client", return_value=mock_db), \
+         patch("app.services.analysis_service.GitHubService.clone_repository_safely", return_value=mock_git_repo), \
+         patch("os.path.exists", return_value=True), \
+         patch("app.services.intelligence_engine.IntelligenceEngine._collect_repository_source_files", return_value={
+             "src/CheckoutService.java": (FIXTURE_PATH / "src" / "CheckoutService.java").read_text(encoding="utf-8")
+         }):
+        response = client.post(f"/api/investigations/{MOCK_INV_ID}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+
+    commits = data.get("relevant_commits", [])
+    assert len(commits) >= 2, "Expected correlated commits in API response"
+
+    # Assert summary references 875bcf7 and Likely regression-introducing commit
+    assert "875bcf7a" in data["summary"]
+    assert "Likely regression-introducing commit" in data["summary"]
+
+    # 1. Rank #1 must be 875bcf7 with 'Likely regression-introducing commit'
+    top_commit = commits[0]
+    assert top_commit["commit_hash"] == "875bcf7a"
+    assert "Likely regression-introducing commit" in top_commit["relevance_reason"]
+    assert "CheckoutService.java" in top_commit["relevance_reason"]
+
+    # Summary commit == relevant_commits[0]
+    assert top_commit["commit_hash"] in data["summary"]
+
+    # 2. Test commit must be 6d5ff2d with 'Regression-detection/testing commit'
+    test_commit = commits[1]
+    assert test_commit["commit_hash"].startswith("6d5ff2d")
+    assert "Regression-detection/testing commit" in test_commit["relevance_reason"]
+
+    # 3. Commit 3 must be 2a2701b with 'Baseline setup commit'
+    base_commit1 = commits[2]
+    assert base_commit1["commit_hash"].startswith("2a2701b")
+    assert "Baseline setup commit" in base_commit1["relevance_reason"]
+    assert "Likely regression-introducing commit" not in base_commit1["relevance_reason"]
+
+    # 4. Commit 4 must be 24705a6 with 'Baseline setup commit'
+    base_commit2 = commits[3]
+    assert base_commit2["commit_hash"].startswith("24705a6")
+    assert "Baseline setup commit" in base_commit2["relevance_reason"]
+    assert "Likely regression-introducing commit" not in base_commit2["relevance_reason"]
+
+
+def test_repeated_analysis_runs_consistency():
+    """
+    Run analysis twice on the same investigation.
+    Verify:
+    Run 1: one complete consistent result.
+    Run 2: new run ID, one complete consistent result, no stale Git classifications inherited.
+    """
+    mock_db = MagicMock()
+    run_records_in_db = []
+
+    # Investigation mock query
+    mock_inv_query = MagicMock()
+    mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_INV_ID,
+            "repository_id": MOCK_REPO_ID,
+            "title": "Repeated Run Case",
+            "status": "ready",
+        }
+    ]
+
+    # Repository mock query
+    mock_repo_query = MagicMock()
+    mock_repo_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_REPO_ID,
+            "github_url": "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed",
+            "clone_url": "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed",
+            "default_branch": "main",
+        }
+    ]
+
+    # Evidence mock
+    evidence_dir = FIXTURE_PATH / "evidence"
+    evidence_data = [
+        {"id": "1", "investigation_id": MOCK_INV_ID, "evidence_type": "bug_report", "title": "Report", "content": (evidence_dir / "bug_report.txt").read_text(), "filename": "bug_report.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "2", "investigation_id": MOCK_INV_ID, "evidence_type": "application_log", "title": "Logs", "content": (evidence_dir / "application.log").read_text(), "filename": "application.log", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "3", "investigation_id": MOCK_INV_ID, "evidence_type": "stack_trace", "title": "Trace", "content": (evidence_dir / "stack_trace.txt").read_text(), "filename": "stack_trace.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+        {"id": "4", "investigation_id": MOCK_INV_ID, "evidence_type": "test_output", "title": "Test", "content": (evidence_dir / "test_output.txt").read_text(), "filename": "test_output.txt", "byte_size": 100, "created_at": "2026-09-19T10:00:00Z"},
+    ]
+    mock_evid_query = MagicMock()
+    mock_evid_query.select.return_value.eq.return_value.order.return_value.execute.return_value.data = evidence_data
+
+    # Investigation runs mock
+    import uuid
+    mock_runs_query = MagicMock()
+
+    def handle_insert(rec):
+        new_id = str(uuid.uuid4())
+        rec_copy = dict(rec)
+        rec_copy["id"] = new_id
+        rec_copy["created_at"] = "2026-09-20T17:35:00Z"
+        run_records_in_db.append(rec_copy)
+        return MagicMock(execute=MagicMock(return_value=MagicMock(data=[rec_copy])))
+
+    mock_runs_query.insert.side_effect = handle_insert
+
+    def handle_select_runs(*args, **kwargs):
+        # Return newest run first
+        sorted_runs = sorted(run_records_in_db, key=lambda r: r["created_at"], reverse=True)
+        m = MagicMock()
+        m.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = sorted_runs[:1]
+        m.eq.return_value.order.return_value.execute.return_value.data = sorted_runs
+        return m
+
+    mock_runs_query.select.side_effect = handle_select_runs
+
+    # Status update tracking
+    mock_update = MagicMock()
+    mock_update.execute.return_value.data = [{"id": MOCK_INV_ID}]
+    mock_inv_query.update.return_value.eq.return_value = mock_update
+
+    mock_db.table.side_effect = lambda table: {
+        "investigations": mock_inv_query,
+        "repositories": mock_repo_query,
+        "investigation_evidence": mock_evid_query,
+        "investigation_runs": mock_runs_query,
+    }.get(table, MagicMock())
+
+    # Build commits
+    c1 = MagicMock(hexsha="6d5ff2db974b", message="test: add unit test for checkout service")
+    c1.stats.files = {"tests/CheckoutServiceTest.java": {}}
+    mock_d1 = MagicMock(b_path="tests/CheckoutServiceTest.java", a_path="tests/CheckoutServiceTest.java", new_file=False, diff=b"+@Test\n")
+    c1.parents = [MagicMock()]
+    c1.parents[0].diff.return_value = [mock_d1]
+
+    c2 = MagicMock(hexsha="875bcf7a1786", message="refactor(checkout): add FLASHSALE discount promo tier")
+    c2.stats.files = {"src/CheckoutService.java": {}}
+    mock_d2 = MagicMock(
+        b_path="src/CheckoutService.java",
+        a_path="src/CheckoutService.java",
+        new_file=False,
+        diff=b"@@ -25,2 +26,5 @@\n+ } else if (\"FLASHSALE\".equalsIgnoreCase(discountCode)) {\n+     return null;\n+ }\n",
+    )
+    c2.parents = [MagicMock()]
+    c2.parents[0].diff.return_value = [mock_d2]
+
+    c3 = MagicMock(hexsha="2a2701b0d6cb", message="feat: add checkout service and payment pipeline")
+    c3.stats.files = {"src/CheckoutService.java": {}}
+    mock_d3 = MagicMock(b_path="src/CheckoutService.java", a_path="src/CheckoutService.java", new_file=True, diff=b"+package com.example.checkout;\n")
+    c3.parents = [MagicMock()]
+    c3.parents[0].diff.return_value = [mock_d3]
+
+    c4 = MagicMock(hexsha="24705a6faca0", message="feat: initial payment and controller setup")
+    c4.stats.files = {"src/CheckoutController.java": {}, "src/PaymentRequestBuilder.java": {}}
+    mock_d4 = MagicMock(b_path="src/CheckoutController.java", a_path="src/CheckoutController.java", new_file=True, diff=b"+package com.example.checkout;\n")
+    c4.parents = []
+    c4.diff.return_value = [mock_d4]
+
+    mock_git_repo = MagicMock()
+    mock_git_repo.iter_commits.return_value = [c1, c2, c3, c4]
+
+    with patch("app.services.analysis_service.get_service_role_client", return_value=mock_db), \
+         patch("app.services.evidence_service.get_service_role_client", return_value=mock_db), \
+         patch("app.services.analysis_service.GitHubService.clone_repository_safely", return_value=mock_git_repo), \
+         patch("os.path.exists", return_value=True), \
+         patch("app.services.intelligence_engine.IntelligenceEngine._collect_repository_source_files", return_value={
+             "src/CheckoutService.java": (FIXTURE_PATH / "src" / "CheckoutService.java").read_text(encoding="utf-8")
+         }):
+        # Run 1
+        resp1 = client.post(f"/api/investigations/{MOCK_INV_ID}/analyze")
+        assert resp1.status_code == 200
+        run1 = resp1.json()
+
+        # Run 2 (Re-run Engine)
+        resp2 = client.post(f"/api/investigations/{MOCK_INV_ID}/analyze")
+        assert resp2.status_code == 200
+        run2 = resp2.json()
+
+    # Verify Run 2 has a new ID and is not mixing data
+    assert run1["id"] != run2["id"], "Each analysis execution must create a new run ID"
+    assert run2["status"] == "completed"
+
+    # Verify Run 2 is internally consistent
+    assert "875bcf7a" in run2["summary"]
+    assert "Likely regression-introducing commit" in run2["summary"]
+    assert run2["relevant_commits"][0]["commit_hash"] == "875bcf7a"
+    assert "Likely regression-introducing commit" in run2["relevant_commits"][0]["relevance_reason"]
+    assert run2["relevant_commits"][1]["commit_hash"].startswith("6d5ff2d")
+    assert "Regression-detection/testing commit" in run2["relevant_commits"][1]["relevance_reason"]
+    assert run2["relevant_commits"][2]["commit_hash"].startswith("2a2701b")
+    assert "Baseline setup commit" in run2["relevant_commits"][2]["relevance_reason"]
+    assert run2["relevant_commits"][3]["commit_hash"].startswith("24705a6")
+    assert "Baseline setup commit" in run2["relevant_commits"][3]["relevance_reason"]
+
+
+
