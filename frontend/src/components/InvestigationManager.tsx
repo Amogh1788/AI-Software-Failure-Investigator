@@ -28,7 +28,7 @@ export const InvestigationManager: React.FC = () => {
       setError(null);
 
       const [invs, repos] = await Promise.all([
-        getInvestigations().catch(() => [] as Investigation[]),
+        getInvestigations(),
         getRepositories().catch(() => [] as Repository[]),
       ]);
 
@@ -52,6 +52,20 @@ export const InvestigationManager: React.FC = () => {
     setSelectedInvestigationId(newInv.id);
   };
 
+  const handleCloseDetail = () => {
+    setSelectedInvestigationId(null);
+    loadData(true);
+  };
+
+  const handleInvestigationUpdated = (updated?: Investigation) => {
+    if (updated) {
+      setInvestigations((prev) =>
+        prev.map((inv) => (inv.id === updated.id ? { ...inv, ...updated } : inv))
+      );
+    }
+    loadData(true);
+  };
+
   const handleDeleteInvestigation = async (id: string) => {
     try {
       await deleteInvestigation(id);
@@ -70,7 +84,7 @@ export const InvestigationManager: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono">
-            Phase 3 — Investigation Cases & Evidence Collection
+            Investigation Cases & Evidence Collection
           </h2>
           <p className="text-xs text-slate-400">
             Structure failure investigations and collect ground-truth telemetry (bug reports, logs, stack traces, test output).
@@ -112,8 +126,8 @@ export const InvestigationManager: React.FC = () => {
       {selectedInvestigationId ? (
         <InvestigationDetail
           investigationId={selectedInvestigationId}
-          onClose={() => setSelectedInvestigationId(null)}
-          onUpdated={() => loadData(true)}
+          onClose={handleCloseDetail}
+          onUpdated={handleInvestigationUpdated}
         />
       ) : isCreating ? (
         <InvestigationCreator

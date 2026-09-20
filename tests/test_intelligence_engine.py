@@ -204,10 +204,16 @@ def test_intelligence_engine_evaluation_fixture_recall(temp_checkout_repo):
     assert any("Logs" in s or "Stack Trace" in s for s in sources)
     assert any("Test" in s for s in sources)
 
-    # Verify correlated git commit identified regression commit
+    # Verify correlated git commits rank regression commit first
     assert len(commits) > 0
-    assert any("FLASHSALE" in c.commit_message for c in commits), "Expected FLASHSALE regression commit to be correlated"
-    assert any("candidate failure files" in c.relevance_reason for c in commits)
+    top_commit = commits[0]
+    assert "FLASHSALE" in top_commit.commit_message, "Expected FLASHSALE regression commit to be top relevant commit"
+    assert "Likely regression-introducing commit" in top_commit.relevance_reason
+
+    # Verify later test commit is identified as regression-detection/testing commit
+    test_commits = [c for c in commits if "add unit test" in c.commit_message or "test:" in c.commit_message]
+    assert len(test_commits) > 0, "Expected test commit in relevant commits"
+    assert "Regression-detection/testing commit" in test_commits[0].relevance_reason
 
 
 # ====================================================================

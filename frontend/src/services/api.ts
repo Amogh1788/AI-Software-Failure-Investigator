@@ -200,7 +200,17 @@ export async function createInvestigation(payload: CreateInvestigationPayload): 
  * Fetch all investigation cases with evidence counts.
  */
 export async function getInvestigations(): Promise<Investigation[]> {
-  const response = await fetchWithTimeout(`${API_BASE_URL}/investigations`);
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/investigations`,
+    {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+    },
+    DEFAULT_TIMEOUT_MS
+  );
   if (!response.ok) {
     const errorMsg = await extractErrorDetail(response, 'Failed to fetch investigations');
     throw new Error(errorMsg);

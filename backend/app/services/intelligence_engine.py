@@ -1,10 +1,13 @@
 import re
 import os
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import git
+
+logger = logging.getLogger("ai_investigator.intelligence_engine")
 
 from app.models.analysis import (
     EvidenceStrength,
@@ -71,7 +74,7 @@ class IntelligenceEngine:
 
         # 6. Analyze Git history correlation
         git_file_scores, relevant_commits = cls._correlate_git_history(
-            git_repo, source_files, combined_bug_report, combined_logs
+            git_repo, source_files, combined_bug_report, combined_logs, combined_test_output
         )
 
         # 7. Score each candidate file using explicit normalized formula
@@ -398,30 +401,58 @@ class IntelligenceEngine:
         return min(1.0, base_score), evidence
 
     @classmethod
+    def _is_test_file(cls, path: str) -> bool:
+        """Check whether a file path is a test/spec file."""
+        p = path.replace("\\", "/").lower()
+        parts = p.split("/")
+        filename = parts[-1]
+        if any(d in parts for d in ("test", "tests", "__tests__", "spec", "specs")):
+            return True
+        if filename.startswith("test_") or filename.endswith(("_test.py", "test.py", "test.java", "test.ts", "test.js", "spec.ts", "spec.js")):
+            return True
+        if "test" in filename and (filename.endswith(".java") or filename.endswith(".py") or filename.endswith(".ts")):
+            return True
+        return False
+
+    @classmethod
     def _correlate_git_history(
         cls,
         repo: Optional[git.Repo],
         source_files: Dict[str, str],
         bug_report: str,
         logs: str,
+        test_output: str = "",
     ) -> Tuple[Dict[str, float], List[RelevantCommit]]:
-        """Extract recent commits touching candidate files and calculate recency score [0, 1]."""
+        """
+        Extract recent commits touching candidate files and calculate recency score [0, 1].
+        Ranks commits so that changes that actually modify suspicious candidate files and
+        introduce relevant incident terms receive higher relevance than later test-only commits.
+        """
         file_scores = {path: 0.0 for path in source_files}
-        relevant_commits: List[RelevantCommit] = []
-
         if not repo:
             return file_scores, []
+
+        scored_commits: List[Tuple[float, RelevantCommit]] = []
 
         try:
             commits = list(repo.iter_commits(max_count=20))
             if not commits:
                 return file_scores, []
 
-            # Extract incident keywords for message matching
-            incident_words = set(re.findall(r"\b[a-zA-Z]{4,}\b", (bug_report + " " + logs).lower()))
+            # Extract incident keywords for message matching (excluding trivial/generic words)
+            stop_words = {
+                "error", "exception", "failed", "failure", "trace", "stack", "line",
+                "with", "from", "that", "this", "have", "were", "when", "then", "into",
+                "more", "some", "time", "date", "null", "case", "file", "unit"
+            }
+            incident_words = {
+                w for w in re.findall(r"\b[a-zA-Z]{4,}\b", (bug_report + " " + logs + " " + test_output).lower())
+                if w not in stop_words
+            }
 
             for idx, commit in enumerate(commits):
                 msg = (commit.message or "").strip()
+                first_line = msg.splitlines()[0] if msg else "No commit message"
                 commit_words = set(re.findall(r"\b[a-zA-Z]{4,}\b", msg.lower()))
                 common_terms = incident_words.intersection(commit_words)
 
@@ -436,34 +467,79 @@ class IntelligenceEngine:
                 except Exception:
                     pass
 
-                matched_any = False
+                matched_candidate_sources: List[str] = []
+                matched_test_files: List[str] = []
+
                 for tfile in touched_files:
-                    # Match relative path or basename
+                    is_test = cls._is_test_file(tfile)
+                    if is_test:
+                        matched_test_files.append(tfile)
+                    # Match relative path or basename against candidate source files
                     for rel_path in source_files:
                         if rel_path.endswith(tfile) or tfile.endswith(rel_path) or os.path.basename(rel_path) == os.path.basename(tfile):
                             file_scores[rel_path] = max(file_scores[rel_path], recency_factor)
-                            matched_any = True
+                            if not is_test:
+                                matched_candidate_sources.append(rel_path)
+                            elif tfile not in matched_test_files:
+                                matched_test_files.append(tfile)
 
-                # Check if commit message matches incident keywords
-                if common_terms or matched_any:
-                    reason = []
-                    if matched_any:
-                        reason.append("Modified candidate failure files")
-                    if common_terms:
-                        top_terms = list(common_terms)[:3]
-                        reason.append(f"Commit message matches incident terms: {', '.join(top_terms)}")
+                # Check if commit is specifically a testing/detection commit
+                is_test_message = bool(
+                    re.search(r"^\s*tests?(\(.*\))?\s*:", first_line, re.IGNORECASE)
+                    or "unit test" in first_line.lower()
+                    or "test case" in first_line.lower()
+                    or "failing test" in first_line.lower()
+                )
+                is_test_commit = is_test_message or (bool(matched_test_files) and not matched_candidate_sources)
 
-                    relevant_commits.append(
-                        RelevantCommit(
-                            commit_hash=commit.hexsha[:8],
-                            author_name=commit.author.name if commit.author else "Unknown",
-                            committed_at=commit.committed_datetime.isoformat() if hasattr(commit, "committed_datetime") else None,
-                            commit_message=msg.splitlines()[0] if msg else "No commit message",
-                            relevance_reason="; ".join(reason),
-                        )
+                if matched_candidate_sources or matched_test_files or common_terms:
+                    commit_relevance = 0.0
+                    reason_parts = []
+
+                    if matched_candidate_sources and not is_test_commit:
+                        # Non-test commit modifying suspicious production candidate file:
+                        # Highest relevance as likely regression-introducing commit.
+                        commit_relevance += 100.0
+                        commit_relevance += len(common_terms) * 20.0
+                        commit_relevance += recency_factor * 10.0
+
+                        file_names = ", ".join(os.path.basename(f) for f in set(matched_candidate_sources))
+                        reason = f"Likely regression-introducing commit. Modified candidate failure files ({file_names})"
+                        if common_terms:
+                            top_terms = sorted(list(common_terms))[:3]
+                            reason += f"; Commit message matches incident terms: {', '.join(top_terms)}"
+                        reason_parts.append(reason)
+
+                    elif is_test_commit:
+                        # Regression-detection or testing commit added for verification.
+                        # Lower rank than the commit introducing the code regression.
+                        commit_relevance += 30.0 + (recency_factor * 5.0)
+                        test_file_names = ", ".join(os.path.basename(f) for f in set(matched_test_files)) if matched_test_files else "tests"
+                        reason_parts.append(f"Regression-detection/testing commit. Added or updated tests ({test_file_names})")
+
+                    else:
+                        commit_relevance += 10.0 + (recency_factor * 5.0)
+                        if common_terms:
+                            top_terms = sorted(list(common_terms))[:3]
+                            reason_parts.append(f"Commit message matches incident terms: {', '.join(top_terms)}")
+                        if matched_candidate_sources:
+                            reason_parts.append("Modified repository files")
+
+                    rel_commit = RelevantCommit(
+                        commit_hash=commit.hexsha[:8],
+                        author_name=commit.author.name if commit.author else "Unknown",
+                        committed_at=commit.committed_datetime.isoformat() if hasattr(commit, "committed_datetime") else None,
+                        commit_message=first_line,
+                        relevance_reason="; ".join(reason_parts) if reason_parts else "Correlated commit",
                     )
-        except Exception:
-            pass
+                    scored_commits.append((commit_relevance, rel_commit))
+
+            # Rank commits by relevance score descending so regression-introducing commits precede test-only commits
+            scored_commits.sort(key=lambda item: item[0], reverse=True)
+            relevant_commits = [item[1] for item in scored_commits]
+
+        except Exception as exc:
+            logger.warning(f"Git history correlation encountered error: {exc}")
 
         return file_scores, relevant_commits[:5]
 

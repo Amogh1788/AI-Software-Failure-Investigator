@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type {
   InvestigationDetail as IDetail,
+  Investigation,
   EvidenceType,
   CreateEvidencePayload,
   InvestigationStatus,
@@ -38,7 +39,7 @@ import { AnalysisReportView } from './AnalysisReportView';
 interface InvestigationDetailProps {
   investigationId: string;
   onClose: () => void;
-  onUpdated?: () => void;
+  onUpdated?: (updated?: Investigation) => void;
 }
 
 const REQUIRED_CATEGORIES: { type: EvidenceType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -104,7 +105,7 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
         status: nextStatus,
       });
       setDetail((prev) => (prev ? { ...prev, investigation: updated } : null));
-      onUpdated?.();
+      onUpdated?.(updated);
       setStatusMessage(`Case status updated to "${nextStatus.toUpperCase()}".`);
       setTimeout(() => setStatusMessage(null), 3000);
     } catch (err: unknown) {
@@ -119,16 +120,33 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
     setError(null);
     setStatusMessage(null);
 
+    // Optimistically update local and notify parent that analysis is in progress
+    if (detail) {
+      const analyzingInv: Investigation = {
+        ...detail.investigation,
+        status: 'analyzing',
+      };
+      setDetail({ ...detail, investigation: analyzingInv });
+      onUpdated?.(analyzingInv);
+    }
+
     try {
       const result = await analyzeInvestigation(investigationId);
       setAnalysis(result);
       const refreshedDetail = await getInvestigation(investigationId);
       setDetail(refreshedDetail);
-      onUpdated?.();
+      onUpdated?.(refreshedDetail.investigation);
       setStatusMessage('Investigation analysis completed successfully.');
       setTimeout(() => setStatusMessage(null), 4000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Investigation analysis failed');
+      try {
+        const revertedDetail = await getInvestigation(investigationId);
+        setDetail(revertedDetail);
+        onUpdated?.(revertedDetail.investigation);
+      } catch {
+        // ignore
+      }
     } finally {
       setIsAnalyzing(false);
     }

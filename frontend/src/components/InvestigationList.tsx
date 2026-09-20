@@ -7,8 +7,9 @@ import {
   CheckCircle2,
   FileEdit,
   Trash2,
+  Loader2,
 } from 'lucide-react';
-import type { Investigation, Repository } from '../types';
+import type { Investigation, Repository, InvestigationStatus } from '../types';
 
 interface InvestigationListProps {
   investigations: Investigation[];
@@ -17,6 +18,52 @@ interface InvestigationListProps {
   onSelectInvestigation: (id: string) => void;
   onDeleteInvestigation?: (id: string) => Promise<void>;
 }
+
+const renderStatusBadge = (status: InvestigationStatus) => {
+  switch (status) {
+    case 'completed':
+      return (
+        <span
+          data-testid="status-badge-completed"
+          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-purple-950/80 text-purple-400 border border-purple-800/60"
+        >
+          <CheckCircle2 className="w-3 h-3 text-purple-400" />
+          <span>Completed</span>
+        </span>
+      );
+    case 'analyzing':
+      return (
+        <span
+          data-testid="status-badge-analyzing"
+          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-indigo-950/80 text-indigo-400 border border-indigo-800/60"
+        >
+          <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+          <span>Analyzing</span>
+        </span>
+      );
+    case 'ready':
+      return (
+        <span
+          data-testid="status-badge-ready"
+          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-emerald-950/80 text-emerald-400 border border-emerald-800/60"
+        >
+          <CheckCircle2 className="w-3 h-3" />
+          <span>Ready</span>
+        </span>
+      );
+    case 'draft':
+    default:
+      return (
+        <span
+          data-testid="status-badge-draft"
+          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase bg-amber-950/80 text-amber-400 border border-amber-800/60"
+        >
+          <FileEdit className="w-3 h-3" />
+          <span>Draft</span>
+        </span>
+      );
+  }
+};
 
 export const InvestigationList: React.FC<InvestigationListProps> = ({
   investigations,
@@ -46,7 +93,6 @@ export const InvestigationList: React.FC<InvestigationListProps> = ({
     <div className="space-y-2.5">
       {investigations.map((inv) => {
         const isSelected = selectedId === inv.id;
-        const isReady = inv.status === 'ready';
 
         return (
           <div
@@ -63,25 +109,7 @@ export const InvestigationList: React.FC<InvestigationListProps> = ({
                 <h4 className="text-sm font-semibold text-slate-100 truncate">
                   {inv.title}
                 </h4>
-                <span
-                  className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase ${
-                    isReady
-                      ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60'
-                      : 'bg-amber-950/80 text-amber-400 border border-amber-800/60'
-                  }`}
-                >
-                  {isReady ? (
-                    <>
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Ready</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileEdit className="w-3 h-3" />
-                      <span>Draft</span>
-                    </>
-                  )}
-                </span>
+                {renderStatusBadge(inv.status)}
               </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
