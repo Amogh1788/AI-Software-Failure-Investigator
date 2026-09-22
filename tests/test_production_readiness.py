@@ -326,7 +326,7 @@ def test_null_owner_investigation_is_rejected():
 
 
 def test_production_database_client_requires_service_role_key():
-    """Verify that in production, get_supabase_client() raises a controlled RuntimeError if service-role key is missing."""
+    """Verify that in production, get_supabase_client() raises a controlled RuntimeError if secret/service-role key is missing."""
     database.reset_supabase_client()
 
     fake_url = "https://prod-ref.supabase.co"
@@ -336,13 +336,37 @@ def test_production_database_client_requires_service_role_key():
         "ENVIRONMENT": "production",
         "SUPABASE_URL": fake_url,
         "SUPABASE_ANON_KEY": fake_anon,
+        "SUPABASE_SECRET_KEY": "",
         "SUPABASE_SERVICE_ROLE_KEY": "",
     }, clear=True):
         import pytest
         with pytest.raises(RuntimeError) as exc_info:
             database.get_supabase_client()
 
+        assert "SUPABASE_SECRET_KEY is required" in str(exc_info.value)
         assert "SUPABASE_SERVICE_ROLE_KEY is required" in str(exc_info.value)
+
+
+def test_production_database_client_works_with_only_secret_key():
+    """Verify that in production, get_supabase_client() successfully initializes with only SUPABASE_SECRET_KEY."""
+    database.reset_supabase_client()
+
+    fake_url = "https://prod-ref.supabase.co"
+    fake_secret = "secret-key-prod-999"
+
+    with patch.dict(os.environ, {
+        "ENVIRONMENT": "production",
+        "SUPABASE_URL": fake_url,
+        "SUPABASE_SECRET_KEY": fake_secret,
+        "SUPABASE_SERVICE_ROLE_KEY": "",
+        "SUPABASE_ANON_KEY": "",
+    }, clear=True), patch("app.core.database.create_client") as mock_create:
+        mock_client = MagicMock()
+        mock_create.return_value = mock_client
+
+        c = database.get_supabase_client()
+        assert c is not None
+        mock_create.assert_called_once_with(fake_url, fake_secret)
 
 
 # ==============================================================================

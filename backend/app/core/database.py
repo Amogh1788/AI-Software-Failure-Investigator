@@ -25,6 +25,11 @@ def get_supabase_client() -> Optional[Client]:
     load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
 
     url = (os.getenv("SUPABASE_URL") if "SUPABASE_URL" in os.environ else settings.SUPABASE_URL or "").strip()
+    secret_key = (
+        os.getenv("SUPABASE_SECRET_KEY")
+        if "SUPABASE_SECRET_KEY" in os.environ
+        else settings.SUPABASE_SECRET_KEY or ""
+    ).strip()
     service_role_key = (
         os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         if "SUPABASE_SERVICE_ROLE_KEY" in os.environ
@@ -38,24 +43,41 @@ def get_supabase_client() -> Optional[Client]:
 
     env_mode = (os.getenv("ENVIRONMENT") or settings.ENVIRONMENT or "development").strip().lower()
 
-    # In production, require SUPABASE_SERVICE_ROLE_KEY for server data operations
-    # rather than silently falling back to publishable SUPABASE_ANON_KEY.
+    # In production, require SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY)
+    # for server data operations rather than silently falling back to publishable SUPABASE_ANON_KEY.
     if env_mode == "production":
-        if not service_role_key or "your-service-role-key" in service_role_key:
+        if secret_key and "your-secret-key" not in secret_key:
+            key = secret_key
+            key_type = "secret (privileged)"
+            logger.info("Using SUPABASE_SECRET_KEY for database operations in production environment.")
+        elif service_role_key and "your-service-role-key" not in service_role_key:
+            key = service_role_key
+            key_type = "legacy service-role (privileged)"
+            logger.warning(
+                "Using legacy SUPABASE_SERVICE_ROLE_KEY fallback for database operations in production environment. "
+                "Please migrate to SUPABASE_SECRET_KEY."
+            )
+        else:
             logger.error(
-                "Configuration error: SUPABASE_SERVICE_ROLE_KEY is required for database operations in production environment. "
+                "Configuration error: SUPABASE_SECRET_KEY is required for database operations in production environment. "
                 "Falling back to publishable anon key is strictly prohibited in production."
             )
             raise RuntimeError(
-                "Database configuration error: SUPABASE_SERVICE_ROLE_KEY is required for server database operations in production."
+                "Database configuration error: SUPABASE_SECRET_KEY is required for server database operations in production "
+                "(SUPABASE_SERVICE_ROLE_KEY is required as legacy fallback)."
             )
-        key = service_role_key
-        key_type = "service-role (privileged)"
     else:
-        # In non-production (development / test), prioritize service-role key if provided;
+        # In non-production (development / test), prioritize secret key, then legacy service-role key;
         # otherwise fall back to anon key.
-        key = service_role_key or anon_key
-        key_type = "service-role (privileged)" if service_role_key else "anon (publishable)"
+        if secret_key and "your-secret-key" not in secret_key:
+            key = secret_key
+            key_type = "secret (privileged)"
+        elif service_role_key and "your-service-role-key" not in service_role_key:
+            key = service_role_key
+            key_type = "legacy service-role (privileged)"
+        else:
+            key = anon_key
+            key_type = "anon (publishable)"
 
     # If already created with same credentials, return existing client
     if _supabase_client is not None and url == _last_url and key == _last_key:
@@ -79,7 +101,7 @@ def get_service_role_client() -> Optional[Client]:
     """
     Retrieve or dynamically initialize the dedicated server-side Supabase client.
     STRICT SECURITY REQUIREMENT:
-    Phase 3 private investigation operations MUST use SUPABASE_SERVICE_ROLE_KEY.
+    Private investigation operations MUST use SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY).
     Does NOT fall back to SUPABASE_ANON_KEY.
     """
     global _service_role_client, _last_service_url, _last_service_key
@@ -88,26 +110,43 @@ def get_service_role_client() -> Optional[Client]:
     load_dotenv(dotenv_path=ROOT_DIR / ".env", override=False)
 
     url = (os.getenv("SUPABASE_URL") if "SUPABASE_URL" in os.environ else settings.SUPABASE_URL or "").strip()
+    secret_key = (
+        os.getenv("SUPABASE_SECRET_KEY")
+        if "SUPABASE_SECRET_KEY" in os.environ
+        else settings.SUPABASE_SECRET_KEY or ""
+    ).strip()
     service_role_key = (
         os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         if "SUPABASE_SERVICE_ROLE_KEY" in os.environ
         else settings.SUPABASE_SERVICE_ROLE_KEY or ""
     ).strip()
 
-    if _service_role_client is not None and url == _last_service_url and service_role_key == _last_service_key:
+    key = ""
+    is_secret = False
+    if secret_key and "your-secret-key" not in secret_key:
+        key = secret_key
+        is_secret = True
+    elif service_role_key and "your-service-role-key" not in service_role_key:
+        key = service_role_key
+        is_secret = False
+
+    if _service_role_client is not None and url == _last_service_url and key == _last_service_key:
         return _service_role_client
 
-    if not url or not service_role_key or "your-project" in url or "your-service-role-key" in service_role_key:
+    if not url or not key or "your-project" in url:
         return None
 
     try:
-        _service_role_client = create_client(url, service_role_key)
+        _service_role_client = create_client(url, key)
         _last_service_url = url
-        _last_service_key = service_role_key
-        logger.info(f"Supabase service-role client initialized for private operations.")
+        _last_service_key = key
+        if is_secret:
+            logger.info("Supabase service client initialized using SUPABASE_SECRET_KEY.")
+        else:
+            logger.warning("Supabase service client initialized using legacy SUPABASE_SERVICE_ROLE_KEY fallback.")
         return _service_role_client
     except Exception as exc:
-        logger.error(f"Failed to initialize Supabase service-role client: {exc}")
+        logger.error(f"Failed to initialize Supabase service client: {exc}")
         return None
 
 
@@ -135,7 +174,7 @@ def check_database_connection() -> Tuple[bool, str]:
         return False, f"Supabase initialization error: {exc}"
 
     if not client:
-        return False, "Supabase client not initialized (missing or invalid SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY in backend/.env)."
+        return False, "Supabase client not initialized (missing or invalid SUPABASE_URL / SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY in backend/.env)."
 
     try:
         # Perform a lightweight query against the projects table

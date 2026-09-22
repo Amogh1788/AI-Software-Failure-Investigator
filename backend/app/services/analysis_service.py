@@ -44,10 +44,10 @@ class AnalysisService:
         """Ensure the dedicated service-role Supabase client is available."""
         client = get_service_role_client()
         if not client:
-            logger.error("SUPABASE_SERVICE_ROLE_KEY is not configured for private investigation operations.")
+            logger.error("SUPABASE_SECRET_KEY is not configured for private investigation operations.")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database service role configuration missing for private investigation operations. Set SUPABASE_SERVICE_ROLE_KEY in server environment.",
+                detail="Database service role configuration missing for private investigation operations. Set SUPABASE_SECRET_KEY in server environment.",
             )
         return client
 

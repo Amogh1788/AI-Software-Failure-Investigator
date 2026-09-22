@@ -12,6 +12,7 @@ if str(backend_dir) not in sys.path:
 
 from app.main import app
 from app.core import database
+from app.core.config import settings
 from app.models.investigation import EvidenceType, InvestigationStatus
 
 client = TestClient(app)
@@ -325,12 +326,13 @@ def test_update_status_ready_succeeds_when_all_four_categories_present():
 
 # 4. Service-Role Key Security Enforcement
 def test_investigation_operations_fail_when_service_role_key_missing():
-    """Verify controlled HTTP 503 error when SUPABASE_SERVICE_ROLE_KEY is absent."""
+    """Verify controlled HTTP 503 error when database server credentials are completely absent."""
     database.reset_supabase_client()
     with patch.dict(os.environ, {
         "SUPABASE_URL": "https://test.supabase.co",
-        "SUPABASE_SERVICE_ROLE_KEY": "",  # Empty service-role key
-    }, clear=True):
+        "SUPABASE_SECRET_KEY": "",
+        "SUPABASE_SERVICE_ROLE_KEY": "",
+    }, clear=True), patch.object(settings, "SUPABASE_SECRET_KEY", ""), patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
         resp = client.get("/api/investigations")
         assert resp.status_code == 503
         assert "service role configuration missing" in resp.json()["detail"].lower()

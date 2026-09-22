@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     # Supabase credentials
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_SECRET_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""  # Legacy fallback (deprecated)
     SUPABASE_JWT_SECRET: str = ""
 
     # Server configuration
