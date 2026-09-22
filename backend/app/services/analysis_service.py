@@ -52,10 +52,15 @@ class AnalysisService:
         return client
 
     @classmethod
-    def analyze_investigation(cls, investigation_id: str) -> InvestigationAnalysisResponse:
+    def analyze_investigation(
+        cls,
+        investigation_id: str,
+        user_id: Optional[str] = None,
+    ) -> InvestigationAnalysisResponse:
         """
         Execute investigation intelligence analysis.
         Strictly enforces:
+          - Only authorized owner can analyze the investigation case.
           - Only investigations with status = 'ready' or 'completed' (for re-analysis) may be analyzed.
           - If still 'draft': returns HTTP 409 Conflict.
           - Transitions: ready -> analyzing -> completed.
@@ -63,24 +68,10 @@ class AnalysisService:
           - Creates a new analysis run record in investigation_runs.
         """
         client = cls._require_db_client()
-        start_time = time.time()
+        from app.services.investigation_service import InvestigationService
+        inv_data = InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
 
-        # 1. Fetch and validate investigation status
-        try:
-            inv_res = client.table("investigations").select("*").eq("id", investigation_id).execute()
-            if not inv_res.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Investigation with ID '{investigation_id}' not found.",
-                )
-            inv_data = inv_res.data[0]
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to query investigation: {str(exc)}",
-            )
+        start_time = time.time()
 
         current_status = inv_data.get("status")
         if current_status == InvestigationStatus.DRAFT.value:
@@ -121,7 +112,7 @@ class AnalysisService:
 
         try:
             # 4. Fetch evidence artifacts
-            evidence_items = EvidenceService.get_evidence_for_investigation(investigation_id)
+            evidence_items = EvidenceService.get_evidence_for_investigation(investigation_id, user_id=user_id)
             evidence_dicts = [e.model_dump() for e in evidence_items]
 
             # 5. Acquire repository code
@@ -230,9 +221,15 @@ class AnalysisService:
                     logger.warning(f"Failed to delete analysis temp directory {temp_dir}: {exc}")
 
     @classmethod
-    def get_latest_analysis(cls, investigation_id: str) -> Optional[InvestigationAnalysisResponse]:
-        """Fetch the most recent completed analysis run for an investigation."""
+    def get_latest_analysis(
+        cls,
+        investigation_id: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[InvestigationAnalysisResponse]:
+        """Fetch the most recent completed analysis run for an authorized investigation."""
         client = cls._require_db_client()
+        from app.services.investigation_service import InvestigationService
+        InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
 
         try:
             res = (
@@ -261,6 +258,8 @@ class AnalysisService:
                 run_duration_ms=run.get("run_duration_ms", 0),
                 created_at=run["created_at"],
             )
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.error(f"Error fetching analysis for '{investigation_id}': {exc}")
             raise HTTPException(
@@ -269,9 +268,15 @@ class AnalysisService:
             )
 
     @classmethod
-    def list_analysis_runs(cls, investigation_id: str) -> List[InvestigationAnalysisResponse]:
-        """Fetch all historical analysis runs for an investigation."""
+    def list_analysis_runs(
+        cls,
+        investigation_id: str,
+        user_id: Optional[str] = None,
+    ) -> List[InvestigationAnalysisResponse]:
+        """Fetch all historical analysis runs for an authorized investigation."""
         client = cls._require_db_client()
+        from app.services.investigation_service import InvestigationService
+        InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
 
         try:
             res = (
@@ -298,6 +303,8 @@ class AnalysisService:
                 )
                 for run in runs
             ]
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.error(f"Error listing analysis runs: {exc}")
             raise HTTPException(

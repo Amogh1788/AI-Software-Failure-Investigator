@@ -36,9 +36,26 @@ def get_supabase_client() -> Optional[Client]:
         else settings.SUPABASE_ANON_KEY or ""
     ).strip()
 
-    # Prioritize privileged service-role key if provided; otherwise fall back to anon key
-    key = service_role_key or anon_key
-    key_type = "service-role (privileged)" if service_role_key else "anon (publishable)"
+    env_mode = (os.getenv("ENVIRONMENT") or settings.ENVIRONMENT or "development").strip().lower()
+
+    # In production, require SUPABASE_SERVICE_ROLE_KEY for server data operations
+    # rather than silently falling back to publishable SUPABASE_ANON_KEY.
+    if env_mode == "production":
+        if not service_role_key or "your-service-role-key" in service_role_key:
+            logger.error(
+                "Configuration error: SUPABASE_SERVICE_ROLE_KEY is required for database operations in production environment. "
+                "Falling back to publishable anon key is strictly prohibited in production."
+            )
+            raise RuntimeError(
+                "Database configuration error: SUPABASE_SERVICE_ROLE_KEY is required for server database operations in production."
+            )
+        key = service_role_key
+        key_type = "service-role (privileged)"
+    else:
+        # In non-production (development / test), prioritize service-role key if provided;
+        # otherwise fall back to anon key.
+        key = service_role_key or anon_key
+        key_type = "service-role (privileged)" if service_role_key else "anon (publishable)"
 
     # If already created with same credentials, return existing client
     if _supabase_client is not None and url == _last_url and key == _last_key:
@@ -110,7 +127,13 @@ def check_database_connection() -> Tuple[bool, str]:
     Perform a real health check against Supabase PostgreSQL.
     Returns (is_connected, message).
     """
-    client = get_supabase_client()
+    try:
+        client = get_supabase_client()
+    except RuntimeError as cfg_err:
+        return False, str(cfg_err)
+    except Exception as exc:
+        return False, f"Supabase initialization error: {exc}"
+
     if not client:
         return False, "Supabase client not initialized (missing or invalid SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY in backend/.env)."
 

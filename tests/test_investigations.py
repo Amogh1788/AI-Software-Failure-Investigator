@@ -132,7 +132,9 @@ def test_add_evidence_valid_types():
 
     # Mock investigation exists
     mock_inv_query = MagicMock()
-    mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [{"id": MOCK_INV_ID}]
+    mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {"id": MOCK_INV_ID, "owner_user_id": "00000000-0000-0000-0000-000000000001"}
+    ]
     mock_inv_query.update.return_value.eq.return_value.execute.return_value.data = [{"id": MOCK_INV_ID}]
 
     valid_types = [
@@ -229,10 +231,10 @@ def test_update_status_draft_always_allowed():
     mock_db = MagicMock()
     mock_inv_query = MagicMock()
     mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
     ]
     mock_inv_query.update.return_value.eq.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Updated Title", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Updated Title", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
     ]
     mock_db.table.return_value = mock_inv_query
 
@@ -252,7 +254,7 @@ def test_update_status_ready_fails_when_missing_evidence():
 
     mock_inv_query = MagicMock()
     mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "status": "draft"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "draft"}
     ]
 
     # Only bug_report present; missing application_log, stack_trace, test_output
@@ -287,10 +289,10 @@ def test_update_status_ready_succeeds_when_all_four_categories_present():
 
     mock_inv_query = MagicMock()
     mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Complete Case", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Complete Case", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
     ]
     mock_inv_query.update.return_value.eq.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Complete Case", "status": "ready", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Complete Case", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "ready", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
     ]
 
     # All 4 categories present
@@ -341,7 +343,7 @@ def test_no_service_role_key_exposed_in_investigation_responses():
 
     mock_inv_query = MagicMock()
     mock_inv_query.select.return_value.order.return_value.execute.return_value.data = [
-        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
+        {"id": MOCK_INV_ID, "repository_id": MOCK_REPO_ID, "title": "Test", "owner_user_id": "00000000-0000-0000-0000-000000000001", "status": "draft", "created_at": "2026-09-19", "updated_at": "2026-09-19"}
     ]
     mock_db.table.return_value = mock_inv_query
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, FileText, ScrollText, AlertTriangle, Cpu, ArrowRight, Lock } from 'lucide-react';
+import { GitBranch, FileText, ScrollText, AlertTriangle, Cpu, ArrowDown, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 export const FutureInvestigationArea: React.FC = () => {
   const inputs = [
@@ -26,70 +26,86 @@ export const FutureInvestigationArea: React.FC = () => {
   ];
 
   return (
-    <section className="space-y-3">
+    <section data-testid="investigation-engine-architecture" className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono">
-            Investigation Engine Pipeline
+          <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono flex items-center gap-2">
+            <span>Investigation Intelligence Engine</span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-800/60 font-medium">
+              <CheckCircle2 className="w-3 h-3 mr-1" /> Active
+            </span>
           </h2>
           <p className="text-xs text-slate-400">
-            Preview of multi-modal failure correlation engine scheduled for future phases.
+            Deterministic multi-source failure correlation engine architecture and pipeline.
           </p>
         </div>
-        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono text-slate-400 bg-slate-800/80 border border-slate-700/60">
-          <Lock className="w-3 h-3 mr-1" />
-          Scheduled for Phase 2+
+        <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded text-xs font-mono text-indigo-400 bg-indigo-950/60 border border-indigo-800/60">
+          <ShieldCheck className="w-3.5 h-3.5 mr-1 text-indigo-400" />
+          Explainable &bull; Zero-LLM
         </span>
       </div>
 
       <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-5 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {inputs.map((input) => {
-            const Icon = input.icon;
-            return (
-              <div
-                key={input.title}
-                className="bg-slate-900/60 border border-slate-800 rounded-md p-3.5 space-y-2 relative"
-              >
-                <div className="flex items-center space-x-2 text-indigo-400">
-                  <Icon className="w-4 h-4" />
-                  <span className="text-xs font-semibold uppercase tracking-wider font-mono text-slate-200">
-                    {input.title}
-                  </span>
+        {/* Step 1: Input Evidence Sources */}
+        <div>
+          <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2 font-semibold">
+            1. Multi-Source Failure Ingestion
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {inputs.map((input) => {
+              const Icon = input.icon;
+              return (
+                <div
+                  key={input.title}
+                  className="bg-slate-900/60 border border-slate-800 rounded-md p-3.5 space-y-2 relative"
+                >
+                  <div className="flex items-center space-x-2 text-indigo-400">
+                    <Icon className="w-4 h-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wider font-mono text-slate-200">
+                      {input.title}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {input.desc}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  {input.desc}
-                </p>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex items-center justify-center space-x-3 text-slate-400 font-mono text-xs py-1">
-          <span className="hidden sm:inline">Repository</span>
-          <span className="text-slate-400">+</span>
-          <span className="hidden sm:inline">Bug Report</span>
-          <span className="text-slate-400">+</span>
-          <span className="hidden sm:inline">Logs</span>
-          <span className="text-slate-400">+</span>
-          <span className="hidden sm:inline">Stack Trace</span>
-          <ArrowRight className="w-4 h-4 text-indigo-400" />
-          <span className="text-slate-200 font-semibold">Investigation Engine</span>
-        </div>
-
-        <div className="bg-slate-900/80 border border-indigo-950 rounded-md p-4 flex items-start space-x-3.5">
-          <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-indigo-400 mt-0.5">
+        {/* Step 2: Causal Correlation Flow Pipeline */}
+        <div className="bg-slate-900/80 border border-indigo-950/80 rounded-md p-4 space-y-3">
+          <div className="flex items-center space-x-2 text-indigo-400 font-mono text-xs font-semibold uppercase tracking-wider">
             <Cpu className="w-4 h-4" />
+            <span>2. Deterministic Pipeline Flow</span>
           </div>
-          <div className="space-y-1">
-            <h3 className="text-xs font-semibold font-mono text-slate-200 uppercase tracking-wide">
-              Future Investigation Engine Specification
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              <strong className="text-slate-300">Repository + Bug Report + Logs + Stack Trace</strong> will eventually be analyzed by the investigation engine. 
-              In subsequent phases, correlation graphs and root-cause localization algorithms will ingest these multi-source telemetry feeds to pinpoint faulty commits, isolate line regressions, and formulate automated remediation plans.
-            </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-mono text-slate-300 py-1 overflow-x-auto">
+            <div className="p-2 bg-slate-800/80 border border-slate-700 rounded text-center w-full sm:w-auto">
+              Repository + 4 Evidence Feeds
+            </div>
+            <ArrowDown className="w-4 h-4 text-indigo-400 sm:-rotate-90 shrink-0" />
+            <div className="p-2 bg-indigo-950/80 border border-indigo-800/80 rounded text-center w-full sm:w-auto text-indigo-300 font-semibold">
+              Evidence Correlation (TF-IDF + Regex)
+            </div>
+            <ArrowDown className="w-4 h-4 text-indigo-400 sm:-rotate-90 shrink-0" />
+            <div className="p-2 bg-slate-800/80 border border-slate-700 rounded text-center w-full sm:w-auto">
+              Ranked Defect Candidates
+            </div>
+            <ArrowDown className="w-4 h-4 text-indigo-400 sm:-rotate-90 shrink-0" />
+            <div className="p-2 bg-purple-950/80 border border-purple-800/80 rounded text-center w-full sm:w-auto text-purple-300 font-semibold">
+              Failure Chain & Git Attribution
+            </div>
           </div>
+
+          <p className="text-xs text-slate-400 leading-relaxed pt-1">
+            The Phase 4 engine evaluates candidate source files by calculating a weighted evidence score:
+            <code className="text-[11px] text-indigo-300 bg-slate-950/80 px-1.5 py-0.5 rounded ml-1 border border-slate-800">
+              0.35 &times; Stack + 0.25 &times; Test + 0.20 &times; Logs + 0.10 &times; Bug + 0.10 &times; Git
+            </code>.
+            Results are synthesized into an itemized causal failure chain and correlated Git commit history.
+          </p>
         </div>
       </div>
     </section>

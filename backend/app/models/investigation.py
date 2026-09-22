@@ -55,6 +55,7 @@ class InvestigationResponse(BaseModel):
     repository_id: str = Field(..., description="UUID of the associated repository")
     title: str = Field(..., description="Investigation title")
     description: Optional[str] = Field(None, description="Investigation description")
+    owner_user_id: Optional[str] = Field(None, description="Owner user UUID")
     status: InvestigationStatus = Field(InvestigationStatus.DRAFT, description="Current workflow status")
     evidence_count: int = Field(0, description="Total number of evidence items attached")
     created_at: str = Field(..., description="Creation timestamp")

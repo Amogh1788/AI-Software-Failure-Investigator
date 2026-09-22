@@ -1,6 +1,7 @@
 import logging
 from typing import List
-from fastapi import APIRouter, status, Response, HTTPException
+from fastapi import APIRouter, status, Response, HTTPException, Depends
+from app.core.auth import get_current_user, AuthenticatedUser
 from app.models.investigation import (
     InvestigationCreateRequest,
     InvestigationUpdateRequest,
@@ -25,22 +26,27 @@ router = APIRouter(prefix="/investigations", tags=["Investigations & Evidence"])
     status_code=status.HTTP_201_CREATED,
     summary="Create an investigation case",
 )
-def create_investigation(request: InvestigationCreateRequest) -> InvestigationResponse:
+def create_investigation(
+    request: InvestigationCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> InvestigationResponse:
     """
     Create a new investigation case linked to an analyzed repository.
-    Initial status is set to 'draft'.
+    Initial status is set to 'draft'. Bound to authenticated owner.
     """
-    return InvestigationService.create_investigation(request)
+    return InvestigationService.create_investigation(request, user_id=current_user.id)
 
 
 @router.get(
     "",
     response_model=List[InvestigationResponse],
-    summary="List all investigation cases",
+    summary="List all investigation cases for authenticated user",
 )
-def list_investigations() -> List[InvestigationResponse]:
-    """Retrieve all previously created investigation cases with evidence counts."""
-    return InvestigationService.list_investigations()
+def list_investigations(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> List[InvestigationResponse]:
+    """Retrieve all investigation cases belonging to the authenticated user."""
+    return InvestigationService.list_investigations(user_id=current_user.id)
 
 
 @router.get(
@@ -48,9 +54,12 @@ def list_investigations() -> List[InvestigationResponse]:
     response_model=InvestigationDetailResponse,
     summary="Get investigation case details",
 )
-def get_investigation(investigation_id: str) -> InvestigationDetailResponse:
-    """Retrieve full details of an investigation, including repository info and attached evidence."""
-    return InvestigationService.get_investigation(investigation_id)
+def get_investigation(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> InvestigationDetailResponse:
+    """Retrieve full details of an authorized investigation."""
+    return InvestigationService.get_investigation(investigation_id, user_id=current_user.id)
 
 
 @router.patch(
@@ -61,12 +70,13 @@ def get_investigation(investigation_id: str) -> InvestigationDetailResponse:
 def update_investigation(
     investigation_id: str,
     request: InvestigationUpdateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> InvestigationResponse:
     """
     Update title, description, or status ('draft' or 'ready').
     Transitioning to 'ready' strictly requires all 4 evidence types to be present.
     """
-    return InvestigationService.update_investigation(investigation_id, request)
+    return InvestigationService.update_investigation(investigation_id, request, user_id=current_user.id)
 
 
 @router.delete(
@@ -74,9 +84,12 @@ def update_investigation(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an investigation case",
 )
-def delete_investigation(investigation_id: str):
+def delete_investigation(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
     """Delete an investigation case and all its attached evidence."""
-    InvestigationService.delete_investigation(investigation_id)
+    InvestigationService.delete_investigation(investigation_id, user_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -89,6 +102,7 @@ def delete_investigation(investigation_id: str):
 def add_evidence(
     investigation_id: str,
     request: EvidenceCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> EvidenceResponse:
     """
     Attach failure evidence (bug_report, application_log, stack_trace, test_output).
@@ -97,9 +111,10 @@ def add_evidence(
     - application_log: 500 KB
     - stack_trace: 200 KB
     - test_output: 200 KB
+    - aggregate evidence total per case: 2 MB
     Oversized inputs are rejected with HTTP 413.
     """
-    return EvidenceService.add_evidence(investigation_id, request)
+    return EvidenceService.add_evidence(investigation_id, request, user_id=current_user.id)
 
 
 @router.get(
@@ -107,9 +122,12 @@ def add_evidence(
     response_model=List[EvidenceResponse],
     summary="List evidence attached to an investigation",
 )
-def get_investigation_evidence(investigation_id: str) -> List[EvidenceResponse]:
-    """Retrieve all evidence items attached to an investigation."""
-    return EvidenceService.get_evidence_for_investigation(investigation_id)
+def get_investigation_evidence(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> List[EvidenceResponse]:
+    """Retrieve all evidence items attached to an authorized investigation."""
+    return EvidenceService.get_evidence_for_investigation(investigation_id, user_id=current_user.id)
 
 
 @router.delete(
@@ -117,9 +135,13 @@ def get_investigation_evidence(investigation_id: str) -> List[EvidenceResponse]:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a single evidence item",
 )
-def delete_evidence(investigation_id: str, evidence_id: str):
-    """Delete a single evidence item from an investigation."""
-    EvidenceService.delete_evidence(investigation_id, evidence_id)
+def delete_evidence(
+    investigation_id: str,
+    evidence_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """Delete a single evidence item from an authorized investigation."""
+    EvidenceService.delete_evidence(investigation_id, evidence_id, user_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -132,14 +154,17 @@ def delete_evidence(investigation_id: str, evidence_id: str):
     response_model=InvestigationAnalysisResponse,
     summary="Run Phase 4 investigation intelligence engine",
 )
-def analyze_investigation(investigation_id: str) -> InvestigationAnalysisResponse:
+def analyze_investigation(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> InvestigationAnalysisResponse:
     """
     Executes deterministic evidence correlation and source ranking
-    for an investigation in 'ready' status.
+    for an authorized investigation in 'ready' status.
     Transitions status to 'analyzing', runs the engine, and marks 'completed'.
     If analysis fails, reverts status to 'ready'.
     """
-    return AnalysisService.analyze_investigation(investigation_id)
+    return AnalysisService.analyze_investigation(investigation_id, user_id=current_user.id)
 
 
 @router.get(
@@ -147,9 +172,12 @@ def analyze_investigation(investigation_id: str) -> InvestigationAnalysisRespons
     response_model=InvestigationAnalysisResponse,
     summary="Get latest analysis results for an investigation",
 )
-def get_latest_analysis(investigation_id: str) -> InvestigationAnalysisResponse:
-    """Retrieve the most recent analysis run results for this investigation."""
-    analysis = AnalysisService.get_latest_analysis(investigation_id)
+def get_latest_analysis(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> InvestigationAnalysisResponse:
+    """Retrieve the most recent analysis run results for an authorized investigation."""
+    analysis = AnalysisService.get_latest_analysis(investigation_id, user_id=current_user.id)
     if not analysis:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -163,7 +191,9 @@ def get_latest_analysis(investigation_id: str) -> InvestigationAnalysisResponse:
     response_model=List[InvestigationAnalysisResponse],
     summary="Get all historical analysis runs for an investigation",
 )
-def list_analysis_runs(investigation_id: str) -> List[InvestigationAnalysisResponse]:
-    """Retrieve history of all analysis runs for this investigation."""
-    return AnalysisService.list_analysis_runs(investigation_id)
-
+def list_analysis_runs(
+    investigation_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> List[InvestigationAnalysisResponse]:
+    """Retrieve history of all analysis runs for an authorized investigation."""
+    return AnalysisService.list_analysis_runs(investigation_id, user_id=current_user.id)

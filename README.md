@@ -1,315 +1,206 @@
 # AI Software Failure Investigator
 
-> **Phase 2 — Repository Ingestion & Codebase Analysis**  
-> AI-assisted software failure investigation and root-cause analysis platform.
+> **Phase 5 — Production Readiness, Security Hardening & MVP Polish (v1.0.0)**
+> Explainable, deterministic software failure investigation and root-cause localization platform.
+
+[![Python](https://img.shields.io/badge/Python-3.14+-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6.svg)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF.svg)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-38B2AC.svg)](https://tailwindcss.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20Auth-3ECF8E.svg)](https://supabase.com/)
+[![Tests](https://img.shields.io/badge/Tests-70%20Backend%20%7C%2012%20Frontend%20Passing-brightgreen.svg)]()
 
 ---
 
-## 1. Project Overview
+## 1. Executive Overview
 
-Modern software ecosystems produce vast volumes of telemetry when incidents occur: Git commits, issue tickets, stack traces, log dumps, and test execution results. Pinpointing the root cause of an incident typically requires developers to manually correlate across these disparate data silos.
+When complex software fails in staging or production, developers and SREs face a flood of disconnected telemetry: Git commit logs, stack traces, test execution reports, system logs, and user bug tickets. Manually synthesizing these disparate silos to identify the faulty file and regression-introducing commit is error-prone, slow, and expensive.
 
-**AI Software Failure Investigator** is engineered to automate and accelerate this investigation pipeline. In future phases, it will ingest multi-modal telemetry—combining:
-- Git repository history, commit diffs, and code blame
-- Bug reports and reproduction steps
-- Structured application logs (stdout/stderr)
-- Stack traces and exception call hierarchies
-- Automated test failure reports
+**AI Software Failure Investigator** is an enterprise-grade root-cause localization and failure intelligence platform. It ingests multi-modal incident evidence, indexes repository codebases safely without arbitrary code execution, and applies a multi-factor deterministic scoring engine to pinpoint the most suspicious files and identify the causal Git commit.
 
-Through machine learning and LLM-powered root-cause analysis, the system will pinpoint regression sources, explain why failures occurred, and suggest remediation steps.
-
-> [!IMPORTANT]
-> **Phase 2 Scope & Boundary**: Phase 2 provides safe public GitHub repository ingestion, static codebase structure mapping, language detection, and recent Git history extraction. **Phase 2 does not perform AI/ML failure investigation yet.** Machine learning, LLM integration, bug localization, and automated remediation will be implemented in subsequent phases.
+> [!NOTE]
+> **Deterministic Intelligence**: The intelligence engine in v1.0.0 uses **100% deterministic, explainable algorithms**—combining exact frame parsing, term frequency correlation, call hierarchy inspection, and Git commit diff analysis. It intentionally requires **zero external LLMs, zero third-party AI APIs, and zero vector databases**, guaranteeing reproducible, auditable, and sub-second investigation results without token costs or hallucinations.
 
 ---
 
-## 2. Architecture & Data Flow
+## 2. Completed Project Milestones (Phases 1–5)
 
-The platform follows a clean, decoupled three-tier architecture:
+| Phase | Milestone | Key Deliverables & Capabilities | Status |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | **Foundation** | Decoupled FastAPI backend, React 19 frontend, Supabase database client, environment architecture, health checks. | Complete |
+| **Phase 2** | **Repository Ingestion** | Safe HTTPS GitHub shallow cloning (`--depth 50`), static file-tree indexing, language detection, commit history extraction, and resource sandboxing. | Complete |
+| **Phase 3** | **Evidence Collection** | Investigation case management, multi-modal evidence ingestion (Stack Traces, Failing Tests, Logs, Bug Reports), aggregate size enforcement (2MB cap), and strict state transitions (`draft` → `ready` → `analyzing` → `completed`). | Complete |
+| **Phase 4** | **Investigation Intelligence Engine** | Multi-factor evidence scoring formula, candidate file ranking, line-level suspicion mapping, Git causal-commit correlation (differentiating regression-introducing commits from test-detection commits), and unified investigation reports. | Complete |
+| **Phase 5** | **Production Readiness & Hardening** | Supabase Auth (JWT verification), case ownership authorization, IP sliding-window rate limiting, security headers (nosniff, DENY, HSTS), sanitized error handling with `X-Request-ID`, deep readiness probe (`/api/health/ready`), React ErrorBoundary, and zero-anon database lockdown. | Complete |
+
+---
+
+## 3. System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                 React 19 Frontend Dashboard                 │
-│              (Vite, TypeScript, Tailwind CSS)               │
-│   Components: Header, SystemStatus, ProjectsList,           │
-│               RepositoryAnalyzer, RepositorySummary,        │
-│               RepositoryFiles (Tree), RepositoryHistory     │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                       HTTP / REST APIs
-                               │
-┌──────────────────────────────▼──────────────────────────────┐
-│                    FastAPI Backend Server                   │
-│             (Uvicorn, Pydantic v2, Python 3.14)             │
-│   Endpoints:                                                │
-│     • GET  /api/health                                      │
-│     • GET  /api/health/db                                   │
-│     • GET  /api/projects                                    │
-│     • POST /api/repositories/analyze                        │
-│     • GET  /api/repositories                                │
-│     • GET  /api/repositories/{id}                           │
-│     • GET  /api/repositories/{id}/files                     │
-│     • GET  /api/repositories/{id}/commits                   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                       Supabase Python SDK
-                               │
-┌──────────────────────────────▼──────────────────────────────┐
-│                  Supabase PostgreSQL Database                │
-│   Tables:                                                   │
-│     • projects                                              │
-│     • repositories                                          │
-│     • repository_files                                      │
-│     • repository_commits                                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Supported Repositories & Ingestion Rules
-
-Phase 2 strictly ingests **public GitHub HTTPS repositories**.
-
-### Accepted Formats
-- `https://github.com/owner/repository`
-- `https://github.com/owner/repository.git`
-
-### Rejected Formats (HTTP 400)
-- SSH URLs (e.g. `git@github.com:owner/repo.git`)
-- Non-GitHub hosts (e.g. GitLab, Bitbucket, self-hosted Git)
-- Private repositories requiring credentials
-- Arbitrary non-HTTPS URLs or file paths (`file://`, `ftp://`)
-- Malformed URLs or directory traversal attempts
-
----
-
-## 4. Security Restrictions & Untrusted Input Policy
-
-Repository contents are treated as **untrusted input**:
-
-1. **Zero Code Execution**: The backend **never** executes scripts, binaries, or build commands from analyzed repositories. The following commands are strictly prohibited and never invoked:
-   - `npm install` / `npm run` / `yarn` / `pnpm`
-   - `pip install` / `python`
-   - `gradle` / `maven` / `make`
-   - Shell scripts, batch files, or compiled binaries
-2. **Static-Only Analysis**: Codebase inspection is performed strictly through static file tree walks, extension-to-language mapping, and safe text line counting.
-3. **Isolated Temporary Directories**: Clones are performed into isolated OS temporary directories (`tempfile.mkdtemp`), scanned, and immediately deleted via `shutil.rmtree` in a guaranteed `finally` block.
-4. **Hard Enforced Limits**:
-   - **Clone Timeout**: 60-second process termination.
-   - **Repository Size Limit**: 100 MB maximum on disk.
-   - **File Count Limit**: Maximum 10,000 files inspected per repository.
-   - **Individual File Size Limit**: Maximum 1 MB for line counting.
-   - **Commit Depth**: Shallow clone (`--depth 50`, `--single-branch`).
-5. **No Source Code Stored in Database**: Only file paths, extensions, languages, file sizes, and lines of code are stored in Supabase. Full source code contents and Git diffs are **never** stored in the database.
-6. **No Credentials Stored**: `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS=""` are enforced during clones to reject private repos without prompting.
-
----
-
-## 5. Technology Stack
-
-### Frontend
-- **React 19** & **TypeScript**
-- **Vite 8** (Build tool & development server)
-- **Tailwind CSS v4** (Modern dark developer-tool UI)
-- **Lucide React** (Clean developer iconography)
-
-### Backend
-- **Python 3.14+**
-- **FastAPI** (Asynchronous REST API framework)
-- **Uvicorn** (ASGI production server)
-- **GitPython** (Safe Git object inspection)
-- **Pydantic v2** & **pydantic-settings** (Typed validation and settings)
-- **Supabase Python SDK** (PostgreSQL database client)
-- **Pytest** & **HTTPX** (Automated endpoint test suite)
-
-### Database
-- **Supabase PostgreSQL**
-- **Row Level Security (RLS)**
-
----
-
-## 6. Database Schema & Migrations
-
-### Phase 1 Schema: [`data/schema.sql`](data/schema.sql)
-Contains the core `projects` table.
-
-### Phase 2 Migration: [`data/phase2_migration.sql`](data/phase2_migration.sql)
-Run this migration in your Supabase SQL Editor to add Phase 2 tables:
-
-```sql
--- 1. repositories table
-CREATE TABLE IF NOT EXISTS public.repositories (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
-    github_url TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    name TEXT NOT NULL,
-    default_branch TEXT,
-    description TEXT,
-    primary_language TEXT,
-    total_files INTEGER NOT NULL DEFAULT 0,
-    source_files INTEGER NOT NULL DEFAULT 0,
-    analyzed_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
-
--- 2. repository_files table
-CREATE TABLE IF NOT EXISTS public.repository_files (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
-    path TEXT NOT NULL,
-    extension TEXT,
-    language TEXT,
-    file_size INTEGER NOT NULL DEFAULT 0,
-    lines_of_code INTEGER NOT NULL DEFAULT 0,
-    is_source_file BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
-
--- 3. repository_commits table
-CREATE TABLE IF NOT EXISTS public.repository_commits (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
-    commit_hash TEXT NOT NULL,
-    author_name TEXT,
-    author_email TEXT,
-    commit_message TEXT,
-    committed_at TIMESTAMPTZ,
-    files_changed INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
-
--- 4. Indexes
-CREATE INDEX IF NOT EXISTS idx_repo_files_repo_id ON public.repository_files(repository_id);
-CREATE INDEX IF NOT EXISTS idx_repo_commits_repo_id ON public.repository_commits(repository_id);
-CREATE INDEX IF NOT EXISTS idx_repo_commits_hash ON public.repository_commits(commit_hash);
-CREATE INDEX IF NOT EXISTS idx_repositories_owner_name ON public.repositories(owner, name);
+                               ┌───────────────────────────┐
+                               │   Client Browser / User   │
+                               └─────────────┬─────────────┘
+                                             │
+                              HTTPS / TLS    │
+                 ┌───────────────────────────┴───────────────────────────┐
+                 │                                                       │
+                 ▼                                                       ▼
+     ┌───────────────────────┐                               ┌───────────────────────┐
+     │   React 19 Frontend   │                               │    FastAPI Backend    │
+     │   • Vite 8 + TS       │                               │   • Python 3.14       │
+     │   • Supabase Auth SDK │  Bearer <Supabase-JWT> Token  │   • Security Headers  │
+     │   • React ErrorBound  │ ────────────────────────────> │   • Sliding RateLimit │
+     │   • 0 Direct DB Query │                               │   • PyJWT Auth Guard  │
+     └───────────────────────┘                               │   • Ownership Filter  │
+                                                             └───────────┬───────────┘
+                                                                         │
+                                                 Supabase Service Role   │
+                                                                         ▼
+                                                             ┌───────────────────────┐
+                                                             │   Supabase PostgreSQL │
+                                                             │   • Row Level Security│
+                                                             │   • Zero Public Anon  │
+                                                             │   • Structured Schema │
+                                                             └───────────────────────┘
 ```
 
 ---
 
-## 7. REST API Endpoints
+## 4. Phase 4 Scoring Methodology
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Backend service health probe |
-| `GET` | `/api/health/db` | Database connectivity probe |
-| `GET` | `/api/projects` | List projects from Supabase |
-| `POST` | `/api/repositories/analyze` | Ingest and statically analyze a public GitHub repository |
-| `GET` | `/api/repositories` | List all analyzed repositories |
-| `GET` | `/api/repositories/{id}` | Get repository summary by UUID |
-| `GET` | `/api/repositories/{id}/files` | Get repository file metadata (tree) |
-| `GET` | `/api/repositories/{id}/commits` | Get repository recent commit history |
-| `POST` | `/api/investigations` | Create a new investigation case linked to a repository |
-| `GET` | `/api/investigations` | List all investigation cases with evidence counts |
-| `GET` | `/api/investigations/{id}` | Retrieve full investigation details, repository, and evidence |
-| `PATCH` | `/api/investigations/{id}` | Update title, description, or status ('draft' / 'ready') |
-| `DELETE` | `/api/investigations/{id}` | Delete investigation case and cascade delete attached evidence |
-| `POST` | `/api/investigations/{id}/evidence` | Attach failure evidence (enforces category size limits) |
-| `GET` | `/api/investigations/{id}/evidence` | List all evidence items for an investigation |
-| `DELETE` | `/api/investigations/{id}/evidence/{evidence_id}` | Delete an individual evidence item |
+The Investigation Intelligence Engine ranks suspicious candidate files by evaluating five weighted evidence dimensions:
+
+$$\text{EvidenceScore} = 0.35 \cdot S + 0.25 \cdot T + 0.20 \cdot L + 0.10 \cdot B + 0.10 \cdot G$$
+
+Where:
+- **$S$ (Stack Trace, 35%)**: Direct matching against top-of-stack exception frames, file basenames, and package-to-source directory mapping.
+- **$T$ (Failing Tests, 25%)**: Detection of failing test class names, test fixture methods, and inverse naming conventions (e.g. `CheckoutServiceTest` $\rightarrow$ `CheckoutService`).
+- **$L$ (Application Logs, 20%)**: Term-frequency matching against warning and error log snippets, component names, and log context.
+- **$B$ (Bug Report, 10%)**: Natural keyword matches against user-reported symptoms, reproduction steps, and component tags.
+- **$G$ (Git History, 10%)**: Frequency of recent commit activity and churn in the repository's shallow commit history.
+
+### Git Causal-Commit Correlation
+The engine inspects Git diffs of recent commits touching candidate files to distinguish between:
+1. **Likely regression-introducing commits**: Commits modifying the candidate file, introducing relevant defect terms, and occurring prior to test commits.
+2. **Regression-detection/testing commits**: Commits adding or updating automated tests that detected the failure.
+3. **Baseline setup commits**: Older foundational commits establishing initial component architecture.
 
 ---
 
-## 8. Phase 3 — Failure Evidence Collection
+## 5. Security Hardening & Untrusted Input Policy
 
-> [!IMPORTANT]
-> **Phase 3 collects and structures failure evidence. AI/ML investigation is not implemented yet.**
-
-### 8.1 Investigation Cases
-An **Investigation Case** represents a single failure incident tied to an analyzed GitHub repository. Cases begin in `draft` status and transition to `ready` once all necessary ground-truth failure artifacts are assembled.
-
-### 8.2 Failure Evidence Categories & Hard Limits
-Evidence payloads are strictly validated, sized, and stored passively without execution:
-
-| Evidence Type | Purpose | Size Limit | Typography |
-|---|---|---|---|
-| `bug_report` | Issue description, steps to reproduce, environment details | 50 KB | Standard |
-| `application_log` | Telemetry, stdout/stderr streams, timestamped events | 500 KB | Monospaced |
-| `stack_trace` | Exception hierarchies, call paths, stack frames | 200 KB | Monospaced |
-| `test_output` | Test runner logs, failed assertions, execution diffs | 200 KB | Monospaced |
-
-Oversized inputs exceeding these byte limits are rejected immediately with HTTP 413 (Content Too Large).
-
-### 8.3 Ready Status Validation
-The backend prevents premature analysis by enforcing that an investigation **cannot** transition from `draft` to `ready` status unless **all four evidence categories** (`bug_report`, `application_log`, `stack_trace`, `test_output`) have been attached. Attempting to mark a case `ready` with missing evidence yields HTTP 409 (Conflict).
-
-### 8.4 Security & RLS Model
-1. **Private RLS Protection**: Row Level Security is enabled on both `investigations` and `investigation_evidence` with **zero public/anon policies**.
-2. **Server-Side Mediation**: All CRUD operations are executed exclusively through the FastAPI backend utilizing `SUPABASE_SERVICE_ROLE_KEY`.
-3. **Frontend Isolation**: The React frontend does not bundle the Supabase SDK, holds no Supabase URLs or secrets, and routes all operations through the `/api/investigations` REST API.
-4. **Untrusted Content Safety**: Evidence payloads are stored as passive text data and are never parsed as executable scripts or executed in any shell.
+1. **Zero Untrusted Code Execution**: The backend **never** compiles, installs, or executes code from ingested repositories. Scripts (`npm`, `pip`, `make`, shell scripts) are strictly prohibited.
+2. **Isolated Ephemeral Sandboxes**: Repositories are cloned into temporary OS directories (`tempfile.mkdtemp`), processed with shallow depth (`--depth 50`), and purged immediately in a guaranteed `finally` block.
+3. **Zero-Anon Database Security**: Supabase public `anon` role permissions are completely revoked from all application tables. All server database operations are channeled through the backend using the privileged `service_role` key.
+4. **Strict JWT Verification & User Isolation**: Every mutation and read request requires a valid Supabase JWT Bearer token. Backend authorization enforces `authenticated_user.id == investigation.owner_user_id` strictly without exception (no universal bootstrap bypass, no NULL legacy bypass). The database column `owner_user_id` is enforced `NOT NULL` post-migration. In production, `SUPABASE_SERVICE_ROLE_KEY` is mandatory for server operations and silent fallback to publishable `anon` keys is blocked with a controlled configuration error.
+5. **Rate Limiting**: In-memory sliding-window limiter prevents abuse:
+   - **Standard endpoints**: 120 requests/min.
+   - **Heavy endpoints** (`/analyze`): 6 requests/min.
+6. **Hard Size Boundaries**:
+   - Repository clone size: 100 MB max.
+   - Individual evidence item: 500 KB max.
+   - Aggregate evidence per case: 2 MB max.
+   - Single file inspection: 1 MB max.
 
 ---
 
-## 9. Running Locally
+## 6. API Reference
+
+### Health & Monitoring
+- `GET /api/health/live` — Liveness probe (process responsiveness).
+- `GET /api/health/ready` — Readiness probe (validates Git CLI and Supabase PostgreSQL connectivity).
+- `GET /api/health` — Basic API status.
+
+### Repositories
+- `GET /api/repositories` — List indexed repositories for the authenticated user.
+- `GET /api/repositories/{id}` — Retrieve repository metadata and summary.
+- `GET /api/repositories/{id}/files` — Retrieve indexed file tree.
+- `GET /api/repositories/{id}/commits` — Retrieve recent commit history.
+- `POST /api/repositories/analyze` — Clone and ingest a public GitHub HTTPS repository.
+
+### Investigations & Evidence
+- `GET /api/investigations?repository_id={id}` — List investigations for a repository.
+- `POST /api/investigations` — Create a new investigation case (`draft`).
+- `GET /api/investigations/{id}` — Retrieve investigation details and attached evidence.
+- `PATCH /api/investigations/{id}` — Update investigation metadata or status.
+- `DELETE /api/investigations/{id}` — Delete an investigation and cascade its evidence.
+- `POST /api/investigations/{id}/evidence` — Upload evidence item (stack trace, test output, log, or bug report).
+- `DELETE /api/investigations/{id}/evidence/{evidence_id}` — Remove an evidence item.
+
+### Investigation Intelligence Engine
+- `POST /api/investigations/{id}/analyze` — Run the deterministic intelligence engine against candidate files and Git history.
+- `GET /api/investigations/{id}/analysis` — Retrieve canonical investigation report and ranking results.
+
+---
+
+## 7. Database Migrations
+
+Apply SQL migrations in your Supabase SQL Editor in the following order:
+
+1. [`data/schema.sql`](data/schema.sql) — Phase 1 projects schema
+2. [`data/phase2_migration.sql`](data/phase2_migration.sql) — Phase 2 repository indexing schema
+3. [`data/phase3_migration.sql`](data/phase3_migration.sql) — Phase 3 investigation & evidence schema
+4. [`data/phase4_migration.sql`](data/phase4_migration.sql) — Phase 4 intelligence analysis persistence
+5. [`data/phase5_production_security.sql`](data/phase5_production_security.sql) — Phase 5 ownership authorization & zero-anon lockdown
+
+---
+
+## 8. Local Development Setup
 
 ### Prerequisites
-- **Node.js** (v18+ recommended, v24 verified)
-- **Python** (v3.10+ recommended, v3.14 verified)
-- **Git** (installed and available in system `PATH`)
+- Python 3.12+ (Python 3.14 recommended)
+- Node.js 20+ and npm
+- Git CLI on system PATH
+- Supabase account & project
 
----
+### Backend Setup
+```bash
+cd backend
+python -m venv .venv
+# On Windows:
+.venv\Scripts\activate
+# On Linux/macOS:
+source .venv/bin/activate
 
-### Database Migrations (Supabase SQL Editor)
-Run the migration scripts in order:
-1. `data/schema.sql` (Phase 1 foundation)
-2. `data/phase2_migration.sql` (Phase 2 repositories)
-3. `data/phase3_migration.sql` (Phase 3 investigations & evidence)
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_JWT_SECRET
 
----
-
-### Backend Setup & Startup
-
-1. **Install dependencies**:
-   ```bash
-   py -m pip install -r backend/requirements.txt
-   ```
-
-2. **Configure environment**:
-   Ensure `backend/.env` has `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
-
-3. **Start the FastAPI backend server**:
-   ```bash
-   py -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
-   ```
-
-Interactive Swagger API docs are available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
-
----
-
-### Frontend Setup & Startup
-
-1. **Install frontend dependencies**:
-   ```bash
-   npm --prefix frontend install
-   ```
-
-2. **Start Vite development server**:
-   ```bash
-   npm --prefix frontend run dev
-   ```
-
-3. **Open Developer Dashboard**:
-   Navigate to [http://localhost:5173](http://localhost:5173).
-
----
-
-## 10. Running Tests
-
-Run the full automated test suite (32 tests covering Phase 1, Phase 2, and Phase 3):
-```powershell
-py -m pytest tests/ -v
+uvicorn app.main:app --reload --port 8000
 ```
 
-Verify frontend TypeScript compilation and production build:
-```powershell
+### Frontend Setup
+```bash
+cd frontend
+npm install
+cp .env.example .env
+# Edit .env with VITE_API_BASE_URL=http://localhost:8000, VITE_SUPABASE_URL, and VITE_SUPABASE_ANON_KEY
+
+npm run dev
+```
+
+### Running Test Suites
+
+#### Backend Pytest Suite (64 Tests)
+```bash
+backend/.venv/Scripts/python.exe -m pytest -v
+```
+
+#### Frontend Vitest Suite (12 Tests)
+```bash
+npm --prefix frontend test -- --run
+```
+
+#### Production Build Validation
+```bash
 npm --prefix frontend run build
 ```
 
 ---
 
-## 11. Next Steps (Future Phases)
+## 9. Production Deployment
 
-- **Phase 4**: Multi-modal root-cause analysis engine correlating logs and stack traces with repository AST diffs.
-- **Phase 5**: Automated patch generation, regression testing, and failure verification.
+For complete production hosting instructions (Vercel, Render, Railway, Docker, Cloudflare), see the [Production Deployment Guide](DEPLOYMENT.md).

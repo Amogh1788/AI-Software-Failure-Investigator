@@ -14,7 +14,7 @@ logger = logging.getLogger("ai_investigator.evidence_service")
 
 
 class EvidenceService:
-    """Service layer managing failure evidence validation, limits, and persistence."""
+    """Service layer managing failure evidence validation, limits, ownership, and persistence."""
 
     # Size limits mapping by evidence type (in bytes)
     LIMITS_BY_TYPE = {
@@ -62,34 +62,47 @@ class EvidenceService:
         cls,
         investigation_id: str,
         request: EvidenceCreateRequest,
+        user_id: Optional[str] = None,
     ) -> EvidenceResponse:
-        """Validate, store, and return new evidence for an investigation."""
+        """Validate, store, and return new evidence for an authorized investigation."""
+        # 1. Enforce individual byte size limit
+        content_bytes = cls.validate_size_limit(request.evidence_type, request.content)
+
         client = cls._require_db_client()
 
-        # 1. Verify that investigation exists
+        from app.services.investigation_service import InvestigationService
+        InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
+
+        # 2. Enforce aggregate evidence size limit per case
         try:
-            inv_res = (
-                client.table("investigations")
-                .select("id")
-                .eq("id", investigation_id)
+            existing_ev_res = (
+                client.table("investigation_evidence")
+                .select("content")
+                .eq("investigation_id", investigation_id)
                 .execute()
             )
-            if not inv_res.data:
+            existing_bytes = sum(
+                len(row.get("content", "").encode("utf-8"))
+                for row in (existing_ev_res.data or [])
+            )
+            if existing_bytes + content_bytes > settings.MAX_EVIDENCE_SIZE_TOTAL_PER_CASE_BYTES:
+                limit_kb = settings.MAX_EVIDENCE_SIZE_TOTAL_PER_CASE_BYTES // 1024
+                actual_kb = round((existing_bytes + content_bytes) / 1024, 1)
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Investigation with ID '{investigation_id}' not found.",
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail=(
+                        f"Aggregate evidence limit exceeded for this investigation case. "
+                        f"Maximum allowed total: {limit_kb} KB, current + new payload: {actual_kb} KB."
+                    ),
                 )
         except HTTPException:
             raise
         except Exception as exc:
-            logger.error(f"Error checking investigation existence: {exc}")
+            logger.error(f"Error checking aggregate evidence size: {exc}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to query investigation: {str(exc)}",
+                detail=f"Database error checking evidence limits: {str(exc)}",
             )
-
-        # 2. Enforce byte size limit
-        content_bytes = cls.validate_size_limit(request.evidence_type, request.content)
 
         # 3. Insert record into investigation_evidence
         record = {
@@ -126,52 +139,69 @@ class EvidenceService:
         except HTTPException:
             raise
         except Exception as exc:
-            logger.error(f"Error persisting evidence: {exc}")
+            logger.error(f"Error inserting evidence for investigation '{investigation_id}': {exc}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Database error while saving evidence: {str(exc)}",
+                detail=f"Failed to persist evidence: {str(exc)}",
             )
 
     @classmethod
-    def get_evidence_for_investigation(cls, investigation_id: str) -> List[EvidenceResponse]:
-        """Fetch all evidence items attached to an investigation."""
+    def get_evidence_for_investigation(
+        cls,
+        investigation_id: str,
+        user_id: Optional[str] = None,
+    ) -> List[EvidenceResponse]:
+        """Retrieve all evidence items for an authorized investigation."""
         client = cls._require_db_client()
+        from app.services.investigation_service import InvestigationService
+        InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
 
         try:
-            res = (
+            evidence_res = (
                 client.table("investigation_evidence")
                 .select("*")
                 .eq("investigation_id", investigation_id)
                 .order("created_at", desc=False)
                 .execute()
             )
-            items = res.data or []
+            rows = evidence_res.data or []
+
             return [
                 EvidenceResponse(
-                    id=item["id"],
-                    investigation_id=item["investigation_id"],
-                    evidence_type=EvidenceType(item["evidence_type"]),
-                    title=item.get("title"),
-                    content=item["content"],
-                    filename=item.get("filename"),
-                    byte_size=len(item["content"].encode("utf-8")),
-                    created_at=item["created_at"],
+                    id=row["id"],
+                    investigation_id=row["investigation_id"],
+                    evidence_type=EvidenceType(row["evidence_type"]),
+                    title=row.get("title"),
+                    content=row["content"],
+                    filename=row.get("filename"),
+                    byte_size=len(row["content"].encode("utf-8")),
+                    created_at=row["created_at"],
                 )
-                for item in items
+                for row in rows
             ]
+        except HTTPException:
+            raise
         except Exception as exc:
-            logger.error(f"Error fetching evidence for investigation '{investigation_id}': {exc}")
+            logger.error(f"Error querying evidence for investigation '{investigation_id}': {exc}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Failed to query evidence: {str(exc)}",
             )
 
     @classmethod
-    def delete_evidence(cls, investigation_id: str, evidence_id: str) -> None:
-        """Delete an individual evidence item."""
+    def delete_evidence(
+        cls,
+        investigation_id: str,
+        evidence_id: str,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Delete an evidence item from an authorized investigation."""
         client = cls._require_db_client()
+        from app.services.investigation_service import InvestigationService
+        InvestigationService.check_investigation_ownership(investigation_id, user_id, client=client)
 
         try:
+            # Delete evidence item scoped to the specific investigation
             del_res = (
                 client.table("investigation_evidence")
                 .delete()
@@ -179,12 +209,12 @@ class EvidenceService:
                 .eq("investigation_id", investigation_id)
                 .execute()
             )
-            # Update investigation updated_at
+            # Touch parent investigation updated_at
             now_iso = datetime.now(timezone.utc).isoformat()
             client.table("investigations").update({"updated_at": now_iso}).eq("id", investigation_id).execute()
         except Exception as exc:
             logger.error(f"Error deleting evidence '{evidence_id}': {exc}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to delete evidence: {str(exc)}",
+                detail=f"Failed to delete evidence item: {str(exc)}",
             )

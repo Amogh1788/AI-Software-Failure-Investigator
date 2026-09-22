@@ -243,6 +243,7 @@ def test_analyze_draft_investigation_returns_409():
             "id": MOCK_INV_ID,
             "repository_id": MOCK_REPO_ID,
             "title": "Unready Case",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
             "status": "draft",
         }
     ]
@@ -278,6 +279,7 @@ def test_analyze_ready_investigation_success(temp_checkout_repo):
             "id": MOCK_INV_ID,
             "repository_id": MOCK_REPO_ID,
             "title": "Checkout Null Pointer Case",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
             "status": "ready",
         }
     ]
@@ -376,6 +378,7 @@ def test_analyze_failure_reverts_status_to_ready(temp_checkout_repo):
             "id": MOCK_INV_ID,
             "repository_id": MOCK_REPO_ID,
             "title": "Faulty Analysis Case",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
             "status": "ready",
         }
     ]
@@ -656,6 +659,7 @@ def test_analyze_api_with_live_remote_commit_structure():
             "id": MOCK_INV_ID,
             "repository_id": MOCK_REPO_ID,
             "title": "Live Remote Testbed Case",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
             "status": "ready",
         }
     ]
@@ -841,6 +845,7 @@ def test_repeated_analysis_runs_consistency():
             "id": MOCK_INV_ID,
             "repository_id": MOCK_REPO_ID,
             "title": "Repeated Run Case",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
             "status": "ready",
         }
     ]

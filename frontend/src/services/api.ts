@@ -18,47 +18,100 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 const DEFAULT_TIMEOUT_MS = 5000;
 const ANALYZE_TIMEOUT_MS = 60000; // 60s for repository cloning and static analysis
+const RETRY_DELAY_MS = 500;
+
+let currentAuthToken: string | null = null;
 
 /**
- * Robust fetch wrapper with hard AbortController timeout.
- * Guaranteed to resolve or abort within the specified timeout.
+ * Register or update the current Supabase access token for authenticated API requests.
+ */
+export function setAuthToken(token: string | null): void {
+  currentAuthToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return currentAuthToken;
+}
+
+/**
+ * Robust fetch wrapper with hard AbortController timeout,
+ * JWT Authorization header injection, and single-retry for idempotent GET requests.
  */
 async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs: number = DEFAULT_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  isRetry: boolean = false
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
 
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  // Attach Supabase JWT Authorization header if available and not already provided
+  if (currentAuthToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${currentAuthToken}`;
+  }
+
+  const isGet = !options.method || options.method.toUpperCase() === 'GET';
+
   try {
     const response = await fetch(url, {
       ...options,
-      headers: {
-        Accept: 'application/json',
-        ...(options.headers || {}),
-      },
+      headers,
       signal: controller.signal,
     });
+
+    // If idempotent GET request returned a transient gateway error (502/503), retry once
+    if (!isRetry && isGet && (response.status === 502 || response.status === 503)) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchWithTimeout(url, options, timeoutMs, true);
+    }
+
     return response;
+  } catch (err: unknown) {
+    // Retry once on network error for idempotent GET only
+    if (!isRetry && isGet) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return fetchWithTimeout(url, options, timeoutMs, true);
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * Extract error detail from response safely.
+ * Extract error detail from response safely, capturing X-Request-ID and specialized status codes.
  */
 async function extractErrorDetail(response: Response, fallback: string): Promise<string> {
+  const requestId = response.headers.get('X-Request-ID');
+  const reqSuffix = requestId ? ` (Request ID: ${requestId})` : '';
+
+  if (response.status === 401) {
+    return `Authentication required or session expired.${reqSuffix}`;
+  }
+  if (response.status === 403) {
+    return `Access forbidden: You do not have permission for this resource.${reqSuffix}`;
+  }
+  if (response.status === 429) {
+    const retryAfter = response.headers.get('Retry-After');
+    const waitMsg = retryAfter ? ` Please retry in ${retryAfter}s.` : ' Please wait before retrying.';
+    return `Rate limit reached.${waitMsg}${reqSuffix}`;
+  }
+
   try {
     const data = await response.json();
-    if (data?.detail) return data.detail;
+    if (data?.detail) return `${data.detail}${reqSuffix}`;
   } catch {
     // ignore JSON parsing failure
   }
-  return `${fallback} (HTTP ${response.status})`;
+  return `${fallback} (HTTP ${response.status})${reqSuffix}`;
 }
 
 // ==========================================
@@ -95,7 +148,7 @@ export async function fetchProjects(): Promise<Project[]> {
 // ==========================================
 
 /**
- * Ingest and analyze a public GitHub repository.
+ * Ingest and analyze a public GitHub repository. Requires authentication.
  */
 export async function analyzeRepository(
   githubUrl: string,
@@ -197,7 +250,7 @@ export async function createInvestigation(payload: CreateInvestigationPayload): 
 }
 
 /**
- * Fetch all investigation cases with evidence counts.
+ * Fetch all investigation cases for authenticated user with evidence counts.
  */
 export async function getInvestigations(): Promise<Investigation[]> {
   const response = await fetchWithTimeout(
@@ -302,7 +355,7 @@ export async function addEvidence(
 }
 
 /**
- * Fetch all evidence items for an investigation.
+ * Fetch all evidence items for an authorized investigation.
  */
 export async function getInvestigationEvidence(investigationId: string): Promise<InvestigationEvidence[]> {
   const response = await fetchWithTimeout(`${API_BASE_URL}/investigations/${investigationId}/evidence`);
@@ -388,4 +441,3 @@ export async function listAnalysisRuns(investigationId: string): Promise<Investi
   }
   return response.json();
 }
-
