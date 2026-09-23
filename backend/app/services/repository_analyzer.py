@@ -106,9 +106,10 @@ class RepositoryAnalyzer:
         total_files = 0
         source_files = 0
 
+        ignored = IGNORED_DIRS.union(settings.EXCLUDED_REPO_PATHS)
         for root, dirs, files in os.walk(repo_dir):
             # Prune ignored directories in-place to avoid descending into them
-            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not d.startswith(".")]
+            dirs[:] = [d for d in dirs if d not in ignored and not d.startswith(".")]
 
             for filename in files:
                 if total_files >= settings.MAX_REPO_FILES:

@@ -100,8 +100,13 @@ export const RepositoryAnalyzer: React.FC = () => {
       setAnalysisState('error');
       const rawMsg = err.message || '';
 
-      if (rawMsg.includes('timed out')) {
-        setErrorMessage('Repository analysis timed out. The repository may be too large.');
+      if (
+        rawMsg.includes('timed out') ||
+        rawMsg.includes('signal is aborted') ||
+        rawMsg.includes('aborted') ||
+        rawMsg.includes('504')
+      ) {
+        setErrorMessage('Repository analysis timed out. The repository may be too large or complex to analyze within the current processing limit.');
       } else if (rawMsg.includes('exceeds the allowed limit')) {
         setErrorMessage('Repository exceeds the allowed analysis size limit.');
       } else if (rawMsg.includes('could not be found') || rawMsg.includes('404')) {

@@ -9,6 +9,7 @@ import git
 
 logger = logging.getLogger("ai_investigator.intelligence_engine")
 
+from app.core.config import settings
 from app.models.analysis import (
     EvidenceStrength,
     CandidateSignals,
@@ -927,7 +928,7 @@ class IntelligenceEngine:
     def _collect_repository_source_files(cls, repo_dir: str) -> Dict[str, str]:
         """Read source code text from repository up to safety limits."""
         source_files: Dict[str, str] = {}
-        ignored_dirs = {".git", "node_modules", "venv", "__pycache__", ".idea", "dist", "build", "target"}
+        ignored_dirs = {".git", "node_modules", "venv", "__pycache__", ".idea", "dist", "build", "target"}.union(settings.EXCLUDED_REPO_PATHS)
         valid_exts = {".java", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".rb", ".cs", ".php", ".cpp", ".c", ".h"}
 
         for root, dirs, files in os.walk(repo_dir):

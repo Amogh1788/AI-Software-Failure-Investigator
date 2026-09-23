@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -37,9 +38,28 @@ class Settings(BaseSettings):
     MAX_REPO_SIZE_MB: int = 100
     MAX_REPO_FILES: int = 10000
     MAX_FILE_SIZE_BYTES: int = 1048576  # 1 MB
-    CLONE_TIMEOUT_SECONDS: int = 60
+    MAX_ANALYZABLE_FILE_MB: int = 10    # 10 MB per-file analysis safety limit
+    CLONE_TIMEOUT_SECONDS: int = 300
     ANALYSIS_TIMEOUT_SECONDS: int = 60
     MAX_COMMITS_TO_ANALYZE: int = 50
+
+    # Configurable Excluded Repository Paths (build outputs, packaged artifacts, dependencies)
+    EXCLUDED_REPO_PATHS: List[str] = [
+        "dist",
+        "build",
+        "target",
+        "node_modules",
+        ".gradle",
+    ]
+
+    @field_validator("EXCLUDED_REPO_PATHS", mode="before")
+    @classmethod
+    def parse_excluded_repo_paths(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        if isinstance(v, (list, tuple, set)):
+            return [str(item).strip() for item in v if str(item).strip()]
+        return ["dist", "build", "target", "node_modules", ".gradle"]
 
     # Phase 3 Failure Evidence Size Limits (bytes)
     MAX_EVIDENCE_BUG_REPORT_BYTES: int = 51200      # 50 KB

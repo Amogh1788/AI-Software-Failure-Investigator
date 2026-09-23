@@ -17,8 +17,11 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 const DEFAULT_TIMEOUT_MS = 5000;
-const ANALYZE_TIMEOUT_MS = 60000; // 60s for repository cloning and static analysis
+export const ANALYZE_TIMEOUT_MS = 330000; // 330s (5.5m) to allow backend 300s clone timeout to complete
 const RETRY_DELAY_MS = 500;
+
+export const TIMEOUT_ERROR_MESSAGE =
+  'Repository analysis timed out. The repository may be too large or complex to analyze within the current processing limit.';
 
 let currentAuthToken: string | null = null;
 
@@ -80,6 +83,15 @@ async function fetchWithTimeout(
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       return fetchWithTimeout(url, options, timeoutMs, true);
     }
+    // Transform browser abort / timeout into a user-friendly error instead of raw "signal is aborted without reason"
+    if (
+      err instanceof Error &&
+      (err.name === 'AbortError' ||
+        err.message.includes('aborted') ||
+        err.message.includes('signal is aborted'))
+    ) {
+      throw new Error(TIMEOUT_ERROR_MESSAGE);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -89,7 +101,7 @@ async function fetchWithTimeout(
 /**
  * Extract error detail from response safely, capturing X-Request-ID and specialized status codes.
  */
-async function extractErrorDetail(response: Response, fallback: string): Promise<string> {
+export async function extractErrorDetail(response: Response, fallback: string): Promise<string> {
   const requestId = response.headers.get('X-Request-ID');
   const reqSuffix = requestId ? ` (Request ID: ${requestId})` : '';
 
@@ -103,6 +115,9 @@ async function extractErrorDetail(response: Response, fallback: string): Promise
     const retryAfter = response.headers.get('Retry-After');
     const waitMsg = retryAfter ? ` Please retry in ${retryAfter}s.` : ' Please wait before retrying.';
     return `Rate limit reached.${waitMsg}${reqSuffix}`;
+  }
+  if (response.status === 504) {
+    return TIMEOUT_ERROR_MESSAGE;
   }
 
   try {
