@@ -45,7 +45,7 @@ function AppContent() {
 
       <footer className="border-t border-slate-800/80 bg-[#0d1322]/40 py-4 text-center text-xs text-slate-400 font-mono">
         <div className="max-w-7xl 2xl:max-w-[1600px] mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>AI Software Failure Investigator &bull; Production MVP v1.0.0</span>
+          <span>RepoDetective &bull; Production MVP v1.0.0</span>
           <span>FastAPI / Supabase PostgreSQL / React 19</span>
         </div>
       </footer>

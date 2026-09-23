@@ -1,4 +1,6 @@
-# AI Software Failure Investigator
+# RepoDetective
+
+### AI-Powered Software Failure Investigation
 
 > **Phase 5 — Production Readiness, Security Hardening & MVP Polish (v1.0.0)**
 > Explainable, deterministic software failure investigation and root-cause localization platform.
@@ -18,7 +20,7 @@
 
 When complex software fails in staging or production, developers and SREs face a flood of disconnected telemetry: Git commit logs, stack traces, test execution reports, system logs, and user bug tickets. Manually synthesizing these disparate silos to identify the faulty file and regression-introducing commit is error-prone, slow, and expensive.
 
-**AI Software Failure Investigator** is an enterprise-grade root-cause localization and failure intelligence platform. It ingests multi-modal incident evidence, indexes repository codebases safely without arbitrary code execution, and applies a multi-factor deterministic scoring engine to pinpoint the most suspicious files and identify the causal Git commit.
+**RepoDetective** is an enterprise-grade root-cause localization and failure intelligence platform. It ingests multi-modal incident evidence, indexes repository codebases safely without arbitrary code execution, and applies a multi-factor deterministic scoring engine to pinpoint the most suspicious files and identify the causal Git commit.
 
 > [!NOTE]
 > **Deterministic Intelligence**: The intelligence engine in v1.0.0 uses **100% deterministic, explainable algorithms**—combining exact frame parsing, term frequency correlation, call hierarchy inspection, and Git commit diff analysis. It intentionally requires **zero external LLMs, zero third-party AI APIs, and zero vector databases**, guaranteeing reproducible, auditable, and sub-second investigation results without token costs or hallucinations.

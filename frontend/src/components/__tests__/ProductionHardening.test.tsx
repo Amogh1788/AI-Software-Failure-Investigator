@@ -62,7 +62,7 @@ describe('Phase 5 Production Hardening & Resilience', () => {
 
       const errorUi = screen.getByTestId('error-boundary-ui');
       expect(errorUi).toBeDefined();
-      expect(screen.getByText('AI Software Failure Investigator')).toBeDefined();
+      expect(screen.getByText('RepoDetective')).toBeDefined();
       expect(screen.getByText(/Something went wrong in the user interface/i)).toBeDefined();
       expect(screen.getByText('Retry')).toBeDefined();
       expect(screen.getByText('Reload Page')).toBeDefined();

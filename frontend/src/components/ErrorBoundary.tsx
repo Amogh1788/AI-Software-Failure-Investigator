@@ -49,7 +49,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
               <div>
                 <h1 className="text-base font-bold text-slate-100">
-                  AI Software Failure Investigator
+                  RepoDetective
                 </h1>
                 <p className="text-xs text-red-400 font-mono">
                   Something went wrong in the user interface.

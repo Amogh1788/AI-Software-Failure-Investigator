@@ -20,7 +20,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
           <div className="min-w-0">
             <div className="flex items-center space-x-2">
               <h1 className="text-base font-semibold tracking-tight text-slate-100 whitespace-nowrap">
-                AI Software Failure Investigator
+                RepoDetective
               </h1>
               <span
                 data-testid="header-phase-badge"
@@ -30,7 +30,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
               </span>
             </div>
             <p className="text-xs text-slate-400 truncate">
-              AI-assisted software failure investigation and root-cause analysis.
+              AI-Powered Software Failure Investigation
             </p>
           </div>
         </div>

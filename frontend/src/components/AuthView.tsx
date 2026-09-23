@@ -56,7 +56,7 @@ export const AuthView: React.FC = () => {
             <Terminal className="w-7 h-7" />
           </div>
           <h2 className="text-xl font-bold tracking-tight text-slate-100">
-            AI Software Failure Investigator
+            RepoDetective
           </h2>
           <p className="text-xs text-slate-400 font-mono">
             {isSignUp ? 'Create your investigator account' : 'Sign in to access your investigation dashboard'}
