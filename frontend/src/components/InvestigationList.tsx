@@ -72,9 +72,15 @@ export const InvestigationList: React.FC<InvestigationListProps> = ({
   onSelectInvestigation,
   onDeleteInvestigation,
 }) => {
-  const getRepoName = (repoId: string) => {
-    const repo = repositories.find((r) => r.id === repoId);
-    return repo ? `${repo.owner}/${repo.name}` : 'Unknown Repository';
+  const getRepoName = (inv: Investigation) => {
+    if (inv.repository) {
+      return `${inv.repository.owner}/${inv.repository.name}`;
+    }
+    const repo = repositories.find((r) => r.id === inv.repository_id);
+    if (repo) {
+      return `${repo.owner}/${repo.name}`;
+    }
+    return 'Repository unavailable';
   };
 
   if (investigations.length === 0) {
@@ -115,7 +121,7 @@ export const InvestigationList: React.FC<InvestigationListProps> = ({
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
                 <span className="flex items-center space-x-1 text-slate-300">
                   <FolderGit2 className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>{getRepoName(inv.repository_id)}</span>
+                  <span>{getRepoName(inv)}</span>
                 </span>
                 <span className="flex items-center space-x-1">
                   <Layers className="w-3.5 h-3.5 text-slate-400" />

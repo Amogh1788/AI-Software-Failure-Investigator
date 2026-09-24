@@ -199,6 +199,7 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
   if (!detail) return null;
 
   const { investigation, repository, evidence } = detail;
+  const linkedRepo = repository || investigation.repository;
   const isReady = investigation.status === 'ready';
   const isCompleted = investigation.status === 'completed';
   const isAnalyzingStatus = investigation.status === 'analyzing' || isAnalyzing;
@@ -240,12 +241,17 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
-            {repository && (
+            {linkedRepo ? (
               <span className="flex items-center space-x-1 text-slate-300">
                 <FolderGit2 className="w-3.5 h-3.5 text-indigo-400" />
                 <span>
-                  {repository.owner}/{repository.name}
+                  {linkedRepo.owner}/{linkedRepo.name}
                 </span>
+              </span>
+            ) : (
+              <span className="flex items-center space-x-1 text-slate-400">
+                <FolderGit2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Repository unavailable</span>
               </span>
             )}
             <span className="flex items-center space-x-1">

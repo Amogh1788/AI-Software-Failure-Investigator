@@ -98,11 +98,12 @@ class InvestigationService:
         client = cls._require_db_client()
 
         # 1. Validate repository association
+        repo_response = None
         try:
             try:
                 repo_res = (
                     client.table("repositories")
-                    .select("id, status")
+                    .select("*")
                     .eq("id", request.repository_id)
                     .execute()
                 )
@@ -129,11 +130,16 @@ class InvestigationService:
                 )
 
             repo_data = repo_res.data[0]
-            if repo_data.get("status") in ["error", "failed"]:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Repository '{request.repository_id}' is in a failed state and cannot be investigated.",
-                )
+            if isinstance(repo_data, dict):
+                if repo_data.get("status") in ["error", "failed"]:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Repository '{request.repository_id}' is in a failed state and cannot be investigated.",
+                    )
+                try:
+                    repo_response = RepositoryResponse(**repo_data)
+                except Exception:
+                    repo_response = None
         except HTTPException:
             raise
         except Exception as exc:
@@ -186,6 +192,7 @@ class InvestigationService:
                 evidence_count=0,
                 created_at=data["created_at"],
                 updated_at=data["updated_at"],
+                repository=repo_response,
             )
         except HTTPException:
             raise
@@ -228,6 +235,27 @@ class InvestigationService:
                 if inv_id:
                     evidence_counts[inv_id] = evidence_counts.get(inv_id, 0) + 1
 
+            # Retrieve linked repositories
+            repo_ids = list({item["repository_id"] for item in invs if item.get("repository_id")})
+            repos_by_id = {}
+            if repo_ids:
+                try:
+                    repos_res = (
+                        client.table("repositories")
+                        .select("*")
+                        .in_("id", repo_ids)
+                        .execute()
+                    )
+                    repos_data = repos_res.data if isinstance(getattr(repos_res, "data", None), list) else []
+                    for r in repos_data:
+                        if isinstance(r, dict) and "id" in r:
+                            try:
+                                repos_by_id[r["id"]] = RepositoryResponse(**r)
+                            except Exception as e:
+                                logger.warning(f"Could not parse repository {r.get('id')}: {e}")
+                except Exception as repo_exc:
+                    logger.warning(f"Error fetching linked repositories for investigations: {repo_exc}")
+
             return [
                 InvestigationResponse(
                     id=item["id"],
@@ -239,6 +267,7 @@ class InvestigationService:
                     evidence_count=evidence_counts.get(item["id"], 0),
                     created_at=item["created_at"],
                     updated_at=item["updated_at"],
+                    repository=repos_by_id.get(item["repository_id"]),
                 )
                 for item in invs
             ]
@@ -264,8 +293,11 @@ class InvestigationService:
                 .eq("id", inv_data["repository_id"])
                 .execute()
             )
-            if repo_res.data:
-                repo_response = RepositoryResponse(**repo_res.data[0])
+            if repo_res.data and isinstance(repo_res.data, list) and isinstance(repo_res.data[0], dict):
+                try:
+                    repo_response = RepositoryResponse(**repo_res.data[0])
+                except Exception:
+                    repo_response = None
 
             # 2. Fetch evidence list
             evidence_list = EvidenceService.get_evidence_for_investigation(investigation_id, user_id=user_id)
@@ -280,6 +312,7 @@ class InvestigationService:
                 evidence_count=len(evidence_list),
                 created_at=inv_data["created_at"],
                 updated_at=inv_data["updated_at"],
+                repository=repo_response,
             )
 
             return InvestigationDetailResponse(
@@ -338,6 +371,14 @@ class InvestigationService:
 
             updates["status"] = request.status.value
 
+        repo_response = None
+        try:
+            repo_res = client.table("repositories").select("*").eq("id", existing["repository_id"]).execute()
+            if repo_res.data and isinstance(repo_res.data, list) and isinstance(repo_res.data[0], dict):
+                repo_response = RepositoryResponse(**repo_res.data[0])
+        except Exception as e:
+            logger.warning(f"Could not construct RepositoryResponse in update_investigation: {e}")
+
         if not updates:
             evidence_list = EvidenceService.get_evidence_for_investigation(investigation_id, user_id=user_id)
             return InvestigationResponse(
@@ -350,6 +391,7 @@ class InvestigationService:
                 evidence_count=len(evidence_list),
                 created_at=existing["created_at"],
                 updated_at=existing["updated_at"],
+                repository=repo_response,
             )
 
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -379,6 +421,7 @@ class InvestigationService:
                 evidence_count=len(evidence_list),
                 created_at=data["created_at"],
                 updated_at=data["updated_at"],
+                repository=repo_response,
             )
         except HTTPException:
             raise

@@ -101,6 +101,7 @@ export interface Investigation {
   evidence_count: number;
   created_at: string;
   updated_at: string;
+  repository?: Repository | null;
 }
 
 export interface InvestigationEvidence {

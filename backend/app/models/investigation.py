@@ -60,6 +60,7 @@ class InvestigationResponse(BaseModel):
     evidence_count: int = Field(0, description="Total number of evidence items attached")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Last update timestamp")
+    repository: Optional[RepositoryResponse] = Field(None, description="Linked repository metadata")
 
     model_config = ConfigDict(from_attributes=True)
 

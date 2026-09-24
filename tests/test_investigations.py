@@ -451,3 +451,144 @@ def test_schema_fix_migration_sql_validity():
     assert "SET status = 'analyzed'" in sql
     assert "repositories_status_check" in sql
     assert "CHECK (status IN ('analyzed', 'pending', 'failed', 'error'))" in sql
+
+
+# 7. Linked Repository Metadata & Cross-User Isolation
+def test_list_investigations_includes_linked_repository_data():
+    """Verify that listing investigations returns linked repository metadata (owner/name/github_url)."""
+    mock_db = MagicMock()
+
+    mock_inv_query = MagicMock()
+    mock_inv_query.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_INV_ID,
+            "repository_id": MOCK_REPO_ID,
+            "title": "FLASHSale Checkout Failure",
+            "description": "504 timeout",
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "ready",
+            "created_at": "2026-09-20T12:00:00Z",
+            "updated_at": "2026-09-20T12:00:00Z",
+        }
+    ]
+
+    mock_repo_query = MagicMock()
+    mock_repo_query.select.return_value.in_.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_REPO_ID,
+            "github_url": "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed",
+            "owner": "Amogh1788",
+            "name": "AI-SFI-Checkout-Testbed",
+            "default_branch": "main",
+            "status": "analyzed",
+            "total_files": 42,
+            "source_files": 30,
+            "analyzed_at": "2026-09-20T11:00:00Z",
+            "created_at": "2026-09-20T11:00:00Z",
+        }
+    ]
+
+    mock_evid_query = MagicMock()
+    mock_evid_query.select.return_value.execute.return_value.data = []
+
+    def table_side_effect(table_name):
+        if table_name == "investigations":
+            return mock_inv_query
+        elif table_name == "repositories":
+            return mock_repo_query
+        elif table_name == "investigation_evidence":
+            return mock_evid_query
+        return MagicMock()
+
+    mock_db.table.side_effect = table_side_effect
+
+    with patch("app.services.investigation_service.get_service_role_client", return_value=mock_db):
+        resp = client.get("/api/investigations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        inv = data[0]
+        assert inv["id"] == MOCK_INV_ID
+        assert inv["repository"] is not None
+        assert inv["repository"]["owner"] == "Amogh1788"
+        assert inv["repository"]["name"] == "AI-SFI-Checkout-Testbed"
+        assert inv["repository"]["github_url"] == "https://github.com/Amogh1788/AI-SFI-Checkout-Testbed"
+
+
+def test_list_investigations_missing_repository_returns_none_repository():
+    """Verify that an investigation pointing to an unresolvable repository sets repository=None."""
+    mock_db = MagicMock()
+
+    mock_inv_query = MagicMock()
+    mock_inv_query.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+        {
+            "id": MOCK_INV_ID,
+            "repository_id": "nonexistent-repo-uuid",
+            "title": "Unlinked Investigation",
+            "description": None,
+            "owner_user_id": "00000000-0000-0000-0000-000000000001",
+            "status": "draft",
+            "created_at": "2026-09-20T12:00:00Z",
+            "updated_at": "2026-09-20T12:00:00Z",
+        }
+    ]
+
+    mock_repo_query = MagicMock()
+    # Repository not found in DB
+    mock_repo_query.select.return_value.in_.return_value.execute.return_value.data = []
+
+    mock_evid_query = MagicMock()
+    mock_evid_query.select.return_value.execute.return_value.data = []
+
+    def table_side_effect(table_name):
+        if table_name == "investigations":
+            return mock_inv_query
+        elif table_name == "repositories":
+            return mock_repo_query
+        elif table_name == "investigation_evidence":
+            return mock_evid_query
+        return MagicMock()
+
+    mock_db.table.side_effect = table_side_effect
+
+    with patch("app.services.investigation_service.get_service_role_client", return_value=mock_db):
+        resp = client.get("/api/investigations")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["repository"] is None
+
+
+def test_investigation_authorization_and_repository_isolation():
+    """Verify User A cannot access User B's investigations and unauthorized repos are not returned."""
+    from app.core.auth import get_current_user, AuthenticatedUser
+
+    user_a = AuthenticatedUser(id="user-a-1111", email="a@example.com", role="authenticated")
+    user_b = AuthenticatedUser(id="user-b-2222", email="b@example.com", role="authenticated")
+
+    mock_db = MagicMock()
+
+    inv_b_id = "inv-b-9999"
+    mock_inv_query = MagicMock()
+    # Return investigation owned by User B
+    mock_inv_query.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": inv_b_id,
+            "repository_id": MOCK_REPO_ID,
+            "title": "User B Investigation",
+            "owner_user_id": user_b.id,
+            "status": "draft",
+        }
+    ]
+
+    mock_db.table.return_value = mock_inv_query
+
+    # User A tries to get User B's investigation detail -> 403 Forbidden
+    app.dependency_overrides[get_current_user] = lambda: user_a
+    try:
+        with patch("app.services.investigation_service.get_service_role_client", return_value=mock_db):
+            resp = client.get(f"/api/investigations/{inv_b_id}")
+            assert resp.status_code == 403
+            assert "Forbidden" in resp.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
