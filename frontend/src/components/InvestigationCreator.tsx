@@ -61,9 +61,6 @@ export const InvestigationCreator: React.FC<InvestigationCreatorProps> = ({
             New Failure Investigation Case
           </h3>
         </div>
-        <span className="text-xs font-mono text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/40">
-          Phase 3
-        </span>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -74,7 +71,7 @@ export const InvestigationCreator: React.FC<InvestigationCreatorProps> = ({
           </label>
           {repositories.length === 0 ? (
             <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded text-xs text-amber-200">
-              No analyzed repositories available. Ingest a GitHub repository above in Phase 2 first.
+              No analyzed repositories available. Analyze a GitHub repository above first.
             </div>
           ) : (
             <div className="relative">

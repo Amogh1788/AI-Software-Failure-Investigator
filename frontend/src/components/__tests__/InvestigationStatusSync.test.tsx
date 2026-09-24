@@ -254,11 +254,11 @@ describe('Investigation Status Synchronization', () => {
 
     // Wait for InvestigationDetail to load
     await waitFor(() => {
-      expect(screen.getByTitle('Run investigation intelligence engine')).toBeDefined();
+      expect(screen.getByTitle('Run investigation analysis')).toBeDefined();
     });
 
-    // 3. Click "Run Engine"
-    const runButton = screen.getByTitle('Run investigation intelligence engine');
+    // 3. Click "Run Analysis"
+    const runButton = screen.getByTitle('Run investigation analysis');
     fireEvent.click(runButton);
 
     // Wait for analysis to complete and success message to show

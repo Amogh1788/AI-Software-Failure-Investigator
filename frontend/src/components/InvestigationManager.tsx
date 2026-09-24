@@ -84,10 +84,10 @@ export const InvestigationManager: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono">
-            Investigation Cases & Evidence Collection
+            Recent Investigations
           </h2>
           <p className="text-xs text-slate-400">
-            Structure failure investigations and collect ground-truth telemetry (bug reports, logs, stack traces, test output).
+            Track failure investigations and attach runtime evidence (logs, stack traces, bug reports, and test output).
           </p>
         </div>
 
@@ -141,13 +141,13 @@ export const InvestigationManager: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Layers className="w-4 h-4 text-indigo-400" />
               <h3 className="text-xs font-semibold font-mono text-slate-200 uppercase tracking-wide">
-                Active Cases ({investigations.length})
+                Investigations ({investigations.length})
               </h3>
             </div>
             {repositories.length === 0 && (
               <span className="text-xs text-amber-400 font-mono flex items-center space-x-1">
                 <FolderGit2 className="w-3.5 h-3.5" />
-                <span>Analyze a repository in Phase 2 above to create cases</span>
+                <span>Analyze a repository above to create cases</span>
               </span>
             )}
           </div>

@@ -28,7 +28,7 @@ export const RepositoryHistory: React.FC<RepositoryHistoryProps> = ({ commits })
             Recent Git History ({commits.length} commits)
           </h3>
           <p className="text-xs text-slate-400">
-            Metadata extracted from the latest repository commits. Diffs excluded in Phase 2.
+            Metadata extracted from recent repository commits.
           </p>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, XCircle, Loader2, Monitor, Server, Database, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Server, Database, Cpu, RefreshCw } from 'lucide-react';
 import type { ConnectionState, SystemStatusState } from '../types';
 
 interface SystemStatusProps {
@@ -35,33 +35,15 @@ const StatusBadge: React.FC<{ state: ConnectionState; label: string }> = ({ stat
   }
 };
 
-const renderDetails = (details?: string) => {
-  if (!details) {
-    return <span className="text-slate-500">No diagnostic info</span>;
-  }
-
-  // Prevent awkward breaking of HTTP status codes like HTTP 200
-  const match = details.match(/(.*?)(\(?HTTP\s+\d+\)?)(.*)/i);
-  if (match) {
-    return (
-      <span className="break-words [overflow-wrap:anywhere]">
-        {match[1]}
-        <span className="whitespace-nowrap font-medium text-slate-300 bg-slate-800/90 px-1 py-0.5 rounded mx-0.5 border border-slate-700/50">
-          {match[2]}
-        </span>
-        {match[3]}
-      </span>
-    );
-  }
-
-  return <span className="break-words [overflow-wrap:anywhere]">{details}</span>;
-};
-
 export const SystemStatus: React.FC<SystemStatusProps> = ({
   status,
   isChecking,
   onCheckConnectivity,
 }) => {
+  const backendConnected = status.backend.status === 'connected';
+  const databaseConnected = status.database.status === 'connected';
+  const analyzerReady = backendConnected && databaseConnected;
+
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
@@ -72,69 +54,60 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({
           onClick={onCheckConnectivity}
           disabled={isChecking}
           className="inline-flex items-center space-x-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-mono hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
-          title="Probe backend and database connectivity in parallel"
+          title="Probe backend and database connectivity"
         >
           <RefreshCw className={`w-3 h-3 ${isChecking ? 'animate-spin text-indigo-400' : ''}`} />
-          <span>{isChecking ? 'Checking...' : 'Check Connectivity'}</span>
+          <span>{isChecking ? 'Checking...' : 'Check Status'}</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-        {/* Frontend Card */}
-        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-4 sm:p-5 flex flex-col justify-between h-full min-h-[140px] space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2.5 min-w-0">
-              <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
-                <Monitor className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-medium text-slate-200 whitespace-nowrap">Frontend Client</h3>
-                <p className="text-[11px] text-slate-400 font-mono whitespace-nowrap">React / Vite (SPA)</p>
-              </div>
-            </div>
-            <StatusBadge state={status.frontend.status} label={status.frontend.label} />
-          </div>
-          <div className="text-xs text-slate-400 font-mono bg-slate-900/60 border border-slate-800/80 rounded px-3 py-2 min-h-[44px] flex items-center leading-relaxed overflow-hidden">
-            {renderDetails(status.frontend.details)}
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* Backend Card */}
-        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-4 sm:p-5 flex flex-col justify-between h-full min-h-[140px] space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2.5 min-w-0">
-              <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
-                <Server className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-medium text-slate-200 whitespace-nowrap">Backend API</h3>
-                <p className="text-[11px] text-slate-400 font-mono whitespace-nowrap">FastAPI / Uvicorn</p>
-              </div>
+        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-3.5 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
+              <Server className="w-4 h-4 text-indigo-400" />
             </div>
-            <StatusBadge state={status.backend.status} label={status.backend.label} />
+            <div>
+              <h3 className="text-xs font-semibold text-slate-200 uppercase font-mono">Backend</h3>
+            </div>
           </div>
-          <div className="text-xs text-slate-400 font-mono bg-slate-900/60 border border-slate-800/80 rounded px-3 py-2 min-h-[44px] flex items-center leading-relaxed overflow-hidden">
-            {renderDetails(status.backend.details)}
-          </div>
+          <StatusBadge
+            state={status.backend.status}
+            label={backendConnected ? 'Connected' : status.backend.label}
+          />
         </div>
 
         {/* Database Card */}
-        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-4 sm:p-5 flex flex-col justify-between h-full min-h-[140px] space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2.5 min-w-0">
-              <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
-                <Database className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-medium text-slate-200 whitespace-nowrap">Database</h3>
-                <p className="text-[11px] text-slate-400 font-mono whitespace-nowrap">Supabase PostgreSQL</p>
-              </div>
+        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-3.5 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
+              <Database className="w-4 h-4 text-indigo-400" />
             </div>
-            <StatusBadge state={status.database.status} label={status.database.label} />
+            <div>
+              <h3 className="text-xs font-semibold text-slate-200 uppercase font-mono">Database</h3>
+            </div>
           </div>
-          <div className="text-xs text-slate-400 font-mono bg-slate-900/60 border border-slate-800/80 rounded px-3 py-2 min-h-[44px] flex items-center leading-relaxed overflow-hidden">
-            {renderDetails(status.database.details)}
+          <StatusBadge
+            state={status.database.status}
+            label={databaseConnected ? 'Connected' : status.database.label}
+          />
+        </div>
+
+        {/* Analyzer Card */}
+        <div className="bg-[#0f172a] border border-slate-800 rounded-lg p-3.5 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="p-2 bg-slate-800/70 border border-slate-700/60 rounded text-slate-300 shrink-0">
+              <Cpu className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-slate-200 uppercase font-mono">Analyzer</h3>
+            </div>
           </div>
+          <StatusBadge
+            state={analyzerReady ? 'connected' : status.backend.status === 'disconnected' ? 'disconnected' : 'checking'}
+            label={analyzerReady ? 'Ready' : status.backend.status === 'disconnected' ? 'Offline' : 'Checking...'}
+          />
         </div>
       </div>
     </section>

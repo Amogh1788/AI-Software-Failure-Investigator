@@ -168,10 +168,10 @@ export const RepositoryAnalyzer: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold tracking-wide text-slate-200 uppercase font-mono">
-            Repository Ingestion & Codebase Analysis
+            Analyze Repository
           </h2>
           <p className="text-xs text-slate-400">
-            Phase 2: Ingest public GitHub repositories, perform static code inspection, and extract commit history.
+            Analyze public GitHub repositories, inspect codebase structure, and extract commit history.
           </p>
         </div>
 

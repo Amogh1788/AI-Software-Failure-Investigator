@@ -81,9 +81,9 @@ export const InvestigationList: React.FC<InvestigationListProps> = ({
     return (
       <div className="p-8 border border-dashed border-slate-800 rounded-lg text-center space-y-2 bg-slate-900/30">
         <Layers className="w-8 h-8 text-slate-600 mx-auto" />
-        <p className="text-xs text-slate-300 font-mono">No investigation cases created yet.</p>
+        <p className="text-xs text-slate-300 font-mono font-medium">No investigations yet.</p>
         <p className="text-[11px] text-slate-400">
-          Create an investigation case above to begin collecting failure evidence.
+          Analyze a repository and create an investigation to get started.
         </p>
       </div>
     );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, RefreshCw, Layers, LogOut, User as UserIcon } from 'lucide-react';
+import { Terminal, RefreshCw, LogOut, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface HeaderProps {
@@ -22,12 +22,6 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
               <h1 className="text-base font-semibold tracking-tight text-slate-100 whitespace-nowrap">
                 RepoDetective
               </h1>
-              <span
-                data-testid="header-phase-badge"
-                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono uppercase font-semibold bg-indigo-950/80 text-indigo-400 border border-indigo-800/60 whitespace-nowrap"
-              >
-                PRODUCTION MVP • v1.0.0
-              </span>
             </div>
             <p className="text-xs text-slate-400 truncate">
               AI-Powered Software Failure Investigation
@@ -36,10 +30,6 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
         </div>
 
         <div className="flex items-center space-x-3 shrink-0">
-          <div className="hidden lg:flex items-center space-x-2 text-xs text-slate-400 font-mono bg-slate-900/60 border border-slate-800 px-2.5 py-1.5 rounded whitespace-nowrap">
-            <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span>Stack: React &bull; FastAPI &bull; Supabase</span>
-          </div>
 
           {user && (
             <div className="flex items-center space-x-2 bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded text-xs font-mono text-slate-300">
@@ -59,7 +49,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
             onClick={onRefresh}
             disabled={isRefreshing}
             className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer select-none"
-            title="Refresh projects"
+            title="Refresh dashboard"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-400' : ''}`} />
             <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>

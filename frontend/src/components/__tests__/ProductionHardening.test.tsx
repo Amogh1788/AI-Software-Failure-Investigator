@@ -81,28 +81,30 @@ describe('Phase 5 Production Hardening & Resilience', () => {
     });
   });
 
-  describe('2. Branding & Production Badge', () => {
-    it('Header displays PRODUCTION MVP • v1.0.0 badge', () => {
+  describe('2. Branding & Clean Product Interface', () => {
+    it('Header displays clean RepoDetective product branding and removes internal MVP badge', () => {
       render(
         <AuthProvider>
           <Header onRefresh={vi.fn()} isRefreshing={false} />
         </AuthProvider>
       );
 
-      const badge = screen.getByTestId('header-phase-badge');
-      expect(badge).toBeDefined();
-      expect(badge.textContent).toBe('PRODUCTION MVP • v1.0.0');
+      expect(screen.getByText('RepoDetective')).toBeDefined();
+      expect(screen.getByText('AI-Powered Software Failure Investigation')).toBeDefined();
+      expect(screen.queryByTestId('header-phase-badge')).toBeNull();
+      expect(screen.queryByText(/PRODUCTION MVP/i)).toBeNull();
     });
 
-    it('Architecture component displays active engine pipeline and removes Phase 2+ obsolete copy', () => {
+    it('Investigation Analysis component displays outcome-focused pipeline without internal formulas or phase text', () => {
       render(<FutureInvestigationArea />);
 
       const section = screen.getByTestId('investigation-engine-architecture');
       expect(section).toBeDefined();
-      expect(screen.getByText(/Investigation Intelligence Engine/i)).toBeDefined();
-      expect(screen.queryByText(/Scheduled for Phase 2\+/i)).toBeNull();
-      expect(screen.queryByText(/Preview of multi-modal failure correlation engine scheduled for future phases/i)).toBeNull();
-      expect(screen.getByText(/0.35 × Stack \+ 0.25 × Test \+ 0.20 × Logs \+ 0.10 × Bug \+ 0.10 × Git/i)).toBeDefined();
+      expect(screen.getAllByText(/Investigation Analysis/i).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/Investigation Intelligence Engine/i)).toBeNull();
+      expect(screen.queryByText(/Phase 4/i)).toBeNull();
+      expect(screen.queryByText(/TF-IDF/i)).toBeNull();
+      expect(screen.queryByText(/0.35 × Stack/i)).toBeNull();
     });
   });
 

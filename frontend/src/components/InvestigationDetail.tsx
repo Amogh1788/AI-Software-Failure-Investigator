@@ -272,7 +272,7 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
               onClick={handleRunAnalysis}
               disabled={isAnalyzingStatus}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white transition-colors cursor-pointer disabled:cursor-not-allowed shadow-sm"
-              title={isCompleted ? "Re-run investigation intelligence engine" : "Run investigation intelligence engine"}
+              title={isCompleted ? "Re-run investigation analysis" : "Run investigation analysis"}
             >
               {isAnalyzingStatus ? (
                 <>
@@ -282,12 +282,12 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
               ) : isCompleted ? (
                 <>
                   <RotateCw className="w-3.5 h-3.5" />
-                  <span>Re-run Engine</span>
+                  <span>Re-run Analysis</span>
                 </>
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Run Engine</span>
+                  <span>Run Analysis</span>
                 </>
               )}
             </button>
@@ -418,15 +418,15 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
         onAddClick={handleOpenEditor}
       />
 
-      {/* Phase 4 Investigation Intelligence Engine Section */}
+      {/* Investigation Analysis Section */}
       {isAnalyzingStatus ? (
         <div className="bg-slate-900/60 border border-indigo-500/30 rounded-lg p-8 text-center space-y-3">
           <span className="inline-block w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
           <h4 className="text-sm font-semibold text-indigo-300 font-mono">
-            Running Phase 4 Investigation Intelligence Engine v1.0.0
+            Running Investigation Analysis
           </h4>
           <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed font-mono">
-            Performing explainable multi-source correlation: parsing stack traces, correlating failing test outputs, matching error log tokens, scoring commit recency, and ranking suspect files.
+            Performing multi-source correlation: parsing stack traces, correlating failing test outputs, matching error log tokens, scoring commit recency, and ranking suspect files.
           </p>
         </div>
       ) : analysis ? (
@@ -441,10 +441,10 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
         <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900 to-indigo-950/40 border border-indigo-800/50 rounded-lg p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="space-y-1 text-left">
             <span className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-indigo-400 uppercase tracking-wide">
-              <Cpu className="w-4 h-4" /> Ready for Investigation Intelligence
+              <Cpu className="w-4 h-4" /> Ready for Investigation Analysis
             </span>
             <p className="text-xs text-slate-300">
-              All 4 failure evidence categories are attached. Run the deterministic intelligence engine to localize suspect defect files and synthesize a step-by-step causal failure chain.
+              All 4 failure evidence categories are attached. Run investigation analysis to localize suspect defect files and synthesize a step-by-step causal failure chain.
             </p>
           </div>
           <button
@@ -452,7 +452,7 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-mono font-semibold transition shrink-0 shadow-md cursor-pointer"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Run Investigation Engine</span>
+            <span>Run Investigation Analysis</span>
           </button>
         </div>
       ) : (
@@ -462,10 +462,10 @@ export const InvestigationDetail: React.FC<InvestigationDetailProps> = ({
           </div>
           <div className="space-y-1">
             <span className="font-semibold font-mono text-slate-200 uppercase tracking-wide">
-              Phase 4 — Investigation Intelligence Engine
+              Investigation Analysis
             </span>
             <p className="leading-relaxed text-slate-400">
-              To run the intelligence engine, attach evidence for all 4 required categories (bug report, runtime logs, stack traces, and test output) and switch the case status to <strong className="text-emerald-400">Ready</strong>.
+              To run investigation analysis, attach evidence for all 4 required categories (bug report, runtime logs, stack traces, and test output) and switch the case status to <strong className="text-emerald-400">Ready</strong>.
             </p>
           </div>
         </div>
