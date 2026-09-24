@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FolderGit2,
   Search,
@@ -7,12 +7,15 @@ import {
   FolderTree,
   History,
   LayoutDashboard,
+  ChevronDown,
+  X,
 } from 'lucide-react';
 import {
   analyzeRepository,
   getRepositories,
   getRepositoryFiles,
   getRepositoryCommits,
+  deleteRepositoryHistory,
 } from '../services/api';
 import type { Repository, RepositoryFile, RepositoryCommit } from '../types';
 import { RepositorySummary } from './RepositorySummary';
@@ -33,6 +36,25 @@ export const RepositoryAnalyzer: React.FC = () => {
   const [repoFiles, setRepoFiles] = useState<RepositoryFile[]>([]);
   const [repoCommits, setRepoCommits] = useState<RepositoryCommit[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('summary');
+
+  // History dropdown state
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+
+  // Close history dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (historyRef.current && !historyRef.current.contains(event.target as Node)) {
+        setIsHistoryOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Load previously analyzed repositories on mount
   const loadExistingRepositories = useCallback(async () => {
@@ -117,6 +139,30 @@ export const RepositoryAnalyzer: React.FC = () => {
     }
   };
 
+  const handleDeleteHistory = async (repoId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingRepoId(repoId);
+    setHistoryError(null);
+    try {
+      await deleteRepositoryHistory(repoId);
+      const remaining = analyzedRepos.filter((r) => r.id !== repoId);
+      setAnalyzedRepos(remaining);
+      if (selectedRepo?.id === repoId) {
+        if (remaining.length > 0) {
+          loadRepositoryDetails(remaining[0]);
+        } else {
+          setSelectedRepo(null);
+          setRepoFiles([]);
+          setRepoCommits([]);
+        }
+      }
+    } catch (err: any) {
+      setHistoryError(err.message || 'Failed to remove repository from history.');
+    } finally {
+      setDeletingRepoId(null);
+    }
+  };
+
   return (
     <section className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -129,25 +175,109 @@ export const RepositoryAnalyzer: React.FC = () => {
           </p>
         </div>
 
-        {analyzedRepos.length > 0 && (
+        <div className="relative" ref={historyRef}>
           <div className="flex items-center space-x-2">
             <span className="text-xs text-slate-400 font-mono">History:</span>
-            <select
-              value={selectedRepo?.id || ''}
-              onChange={(e) => {
-                const target = analyzedRepos.find((r) => r.id === e.target.value);
-                if (target) loadRepositoryDetails(target);
-              }}
-              className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 font-mono outline-none focus:border-indigo-500"
+            <button
+              type="button"
+              onClick={() => setIsHistoryOpen((prev) => !prev)}
+              className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 font-mono outline-none focus:border-indigo-500 transition-colors"
+              aria-expanded={isHistoryOpen}
+              aria-haspopup="true"
             >
-              {analyzedRepos.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.owner}/{r.name} ({r.primary_language || 'Repo'})
-                </option>
-              ))}
-            </select>
+              <span className="truncate max-w-[200px] sm:max-w-[240px]">
+                {selectedRepo
+                  ? `${selectedRepo.owner}/${selectedRepo.name}`
+                  : analyzedRepos.length > 0
+                  ? 'Select repository...'
+                  : 'No repository history'}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isHistoryOpen ? 'rotate-180' : ''}`} />
+            </button>
           </div>
-        )}
+
+          {isHistoryOpen && (
+            <div className="absolute right-0 mt-1.5 w-80 sm:w-96 bg-slate-900 border border-slate-800 rounded-md shadow-xl z-50 overflow-hidden text-xs">
+              {historyError && (
+                <div className="p-2.5 bg-red-950/60 border-b border-red-800/60 text-red-300 flex items-center justify-between text-xs" role="alert">
+                  <div className="flex items-center space-x-1.5 truncate">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-400" />
+                    <span className="truncate">{historyError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryError(null)}
+                    className="text-red-400 hover:text-red-200 ml-2"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {analyzedRepos.length === 0 ? (
+                <div className="p-4 text-center space-y-1">
+                  <p className="font-semibold text-slate-300">No repository history yet.</p>
+                  <p className="text-slate-400">Analyze a public GitHub repository to see it here.</p>
+                </div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto divide-y divide-slate-800/60">
+                  {analyzedRepos.map((repo) => {
+                    const isSelected = selectedRepo?.id === repo.id;
+                    const isDeleting = deletingRepoId === repo.id;
+                    return (
+                      <div
+                        key={repo.id}
+                        onClick={() => {
+                          loadRepositoryDetails(repo);
+                          setIsHistoryOpen(false);
+                        }}
+                        className={`group flex items-center justify-between p-2.5 cursor-pointer transition-colors ${
+                          isSelected ? 'bg-indigo-950/40 text-indigo-200' : 'hover:bg-slate-800/60 text-slate-200'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-mono font-medium truncate">
+                              {repo.owner}/{repo.name}
+                            </span>
+                            {repo.primary_language && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700/50">
+                                {repo.primary_language}
+                              </span>
+                            )}
+                          </div>
+                          {repo.analyzed_at && (
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {new Date(repo.analyzed_at).toLocaleDateString(undefined, {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })}
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          aria-label={`Remove ${repo.owner}/${repo.name} from history`}
+                          disabled={isDeleting}
+                          onClick={(e) => handleDeleteHistory(repo.id, e)}
+                          className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors shrink-0 disabled:opacity-50"
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />
+                          ) : (
+                            <X className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* URL Input Form */}

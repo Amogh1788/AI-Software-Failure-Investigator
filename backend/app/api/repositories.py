@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, status, Depends
+from fastapi import APIRouter, status, Depends, Response
 from app.core.auth import get_current_user, AuthenticatedUser
 from app.models.repository import (
     RepositoryAnalyzeRequest,
@@ -30,17 +30,45 @@ def analyze_repository(
     return RepositoryService.analyze_repository(
         github_url=payload.github_url,
         project_id=payload.project_id,
+        user_id=current_user.id,
     )
 
 
 @router.get(
     "",
     response_model=List[RepositoryResponse],
-    summary="List analyzed repositories (Public Metadata)",
+    summary="List analyzed repositories for current user (Authenticated)",
 )
-def list_repositories() -> List[RepositoryResponse]:
-    """Retrieve all previously analyzed GitHub repositories."""
-    return RepositoryService.list_repositories()
+def list_repositories(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> List[RepositoryResponse]:
+    """Retrieve all previously analyzed GitHub repositories for the authenticated user."""
+    return RepositoryService.list_repositories(user_id=current_user.id)
+
+
+@router.delete(
+    "/{repository_id}/history",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a repository from the user's history (Authenticated)",
+)
+@router.delete(
+    "/{repository_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    include_in_schema=False,
+)
+def delete_repository_history(
+    repository_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Remove a repository from the authenticated user's history.
+    Does not delete the underlying repository or analysis data.
+    """
+    RepositoryService.delete_user_repository_history(
+        repository_id=repository_id,
+        user_id=current_user.id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

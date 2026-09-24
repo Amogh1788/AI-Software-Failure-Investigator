@@ -33,7 +33,12 @@ class RepositoryService:
     """Orchestrates repository ingestion, static analysis, history extraction, and persistence."""
 
     @classmethod
-    def analyze_repository(cls, github_url: str, project_id: Optional[str] = None) -> RepositoryDetailResponse:
+    def analyze_repository(
+        cls,
+        github_url: str,
+        project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> RepositoryDetailResponse:
         """
         Validate URL, clone to isolated temp directory, analyze codebase and Git history,
         persist metadata into Supabase, and clean up disk resources.
@@ -77,6 +82,7 @@ class RepositoryService:
                 repo_record,
                 analysis_results["files"],
                 commits,
+                user_id=user_id,
             )
 
             files_response = [
@@ -130,8 +136,14 @@ class RepositoryService:
                     logger.warning(f"Failed to fully delete temp dir {temp_dir}: {exc}")
 
     @classmethod
-    def _save_to_supabase(cls, repo_data: Dict, files: List[Dict], commits: List[Dict]) -> RepositoryResponse:
-        """Insert repository, files, and commits into Supabase PostgreSQL."""
+    def _save_to_supabase(
+        cls,
+        repo_data: Dict,
+        files: List[Dict],
+        commits: List[Dict],
+        user_id: Optional[str] = None,
+    ) -> RepositoryResponse:
+        """Insert or reuse repository, files, and commits, and link user history in Supabase PostgreSQL."""
         client = get_supabase_client()
         if not client:
             logger.warning("Supabase client not initialized; returning unpersisted analysis.")
@@ -142,50 +154,78 @@ class RepositoryService:
             )
 
         try:
-            # 1. Insert repository record
-            insert_res = client.table("repositories").insert(repo_data).execute()
-            if not insert_res.data:
-                raise Exception("Failed to insert repository record into Supabase.")
-
-            repo_record = insert_res.data[0]
-            repo_id = repo_record["id"]
-
-            # 2. Bulk insert repository files in batches of 300
-            file_records = [
-                {
-                    "repository_id": repo_id,
-                    "path": f["path"],
-                    "extension": f.get("extension"),
-                    "language": f.get("language"),
-                    "file_size": f.get("file_size", 0),
-                    "lines_of_code": f.get("lines_of_code", 0),
-                    "is_source_file": f.get("is_source_file", True),
+            # 1. Check if repository already exists by github_url to avoid duplicating repository records
+            existing_res = client.table("repositories").select("*").eq("github_url", repo_data["github_url"]).execute()
+            if existing_res.data:
+                repo_record = existing_res.data[0]
+                repo_id = repo_record["id"]
+                # Update latest analysis stats on existing repository
+                update_payload = {
+                    "analyzed_at": repo_data["analyzed_at"],
+                    "primary_language": repo_data.get("primary_language"),
+                    "total_files": repo_data.get("total_files"),
+                    "source_files": repo_data.get("source_files"),
+                    "status": "analyzed",
                 }
-                for f in files
-            ]
+                client.table("repositories").update(update_payload).eq("id", repo_id).execute()
+                repo_record.update(update_payload)
+            else:
+                # Insert new repository record
+                insert_res = client.table("repositories").insert(repo_data).execute()
+                if not insert_res.data:
+                    raise Exception("Failed to insert repository record into Supabase.")
 
-            for i in range(0, len(file_records), 300):
-                chunk = file_records[i : i + 300]
-                client.table("repository_files").insert(chunk).execute()
+                repo_record = insert_res.data[0]
+                repo_id = repo_record["id"]
 
-            # 3. Bulk insert commits
-            commit_records = [
-                {
+                # 2. Bulk insert repository files in batches of 300
+                file_records = [
+                    {
+                        "repository_id": repo_id,
+                        "path": f["path"],
+                        "extension": f.get("extension"),
+                        "language": f.get("language"),
+                        "file_size": f.get("file_size", 0),
+                        "lines_of_code": f.get("lines_of_code", 0),
+                        "is_source_file": f.get("is_source_file", True),
+                    }
+                    for f in files
+                ]
+
+                for i in range(0, len(file_records), 300):
+                    chunk = file_records[i : i + 300]
+                    client.table("repository_files").insert(chunk).execute()
+
+                # 3. Bulk insert commits
+                commit_records = [
+                    {
+                        "repository_id": repo_id,
+                        "commit_hash": c["commit_hash"],
+                        "author_name": c.get("author_name"),
+                        "author_email": c.get("author_email"),
+                        "commit_message": c.get("commit_message"),
+                        "committed_at": c.get("committed_at"),
+                        "files_changed": c.get("files_changed", 0),
+                    }
+                    for c in commits
+                ]
+
+                if commit_records:
+                    for i in range(0, len(commit_records), 300):
+                        chunk = commit_records[i : i + 300]
+                        client.table("repository_commits").insert(chunk).execute()
+
+            # 4. Link to user_repository_history if user_id is provided
+            if user_id:
+                history_data = {
+                    "user_id": user_id,
                     "repository_id": repo_id,
-                    "commit_hash": c["commit_hash"],
-                    "author_name": c.get("author_name"),
-                    "author_email": c.get("author_email"),
-                    "commit_message": c.get("commit_message"),
-                    "committed_at": c.get("committed_at"),
-                    "files_changed": c.get("files_changed", 0),
+                    "analyzed_at": repo_data["analyzed_at"],
                 }
-                for c in commits
-            ]
-
-            if commit_records:
-                for i in range(0, len(commit_records), 300):
-                    chunk = commit_records[i : i + 300]
-                    client.table("repository_commits").insert(chunk).execute()
+                client.table("user_repository_history").upsert(
+                    history_data,
+                    on_conflict="user_id,repository_id",
+                ).execute()
 
             return RepositoryResponse(**repo_record)
 
@@ -197,21 +237,93 @@ class RepositoryService:
             )
 
     @classmethod
-    def list_repositories(cls) -> List[RepositoryResponse]:
-        """Fetch all analyzed repositories ordered by analyzed_at descending."""
+    def list_repositories(cls, user_id: Optional[str] = None) -> List[RepositoryResponse]:
+        """Fetch analyzed repositories. If user_id is provided, scopes to user's history."""
         client = get_supabase_client()
         if not client:
             return []
 
         try:
-            res = client.table("repositories").select("*").order("analyzed_at", desc=True).execute()
-            data = res.data or []
-            return [RepositoryResponse(**r) for r in data]
+            if user_id:
+                res = (
+                    client.table("user_repository_history")
+                    .select("repository_id, analyzed_at")
+                    .eq("user_id", user_id)
+                    .order("analyzed_at", desc=True)
+                    .execute()
+                )
+                history_rows = res.data or []
+                if not history_rows:
+                    return []
+
+                repo_ids = [row["repository_id"] for row in history_rows]
+                repos_res = client.table("repositories").select("*").in_("id", repo_ids).execute()
+                repos_by_id = {r["id"]: r for r in (repos_res.data or [])}
+
+                result = []
+                for row in history_rows:
+                    rid = row["repository_id"]
+                    if rid in repos_by_id:
+                        r_data = dict(repos_by_id[rid])
+                        r_data["analyzed_at"] = row.get("analyzed_at") or r_data.get("analyzed_at")
+                        result.append(RepositoryResponse(**r_data))
+                return result
+            else:
+                res = client.table("repositories").select("*").order("analyzed_at", desc=True).execute()
+                data = res.data or []
+                return [RepositoryResponse(**r) for r in data]
         except Exception as exc:
             logger.error(f"Error listing repositories: {exc}")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Failed to query repositories: {str(exc)}",
+            )
+
+    @classmethod
+    def delete_user_repository_history(cls, repository_id: str, user_id: str) -> None:
+        """
+        Delete a repository from a specific user's history.
+        Preserves the repository record, files, commits, and any other users' history.
+        Raises 404 if repository does not exist at all.
+        Raises 403 if repository exists but is not in user's history.
+        """
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unconfigured.")
+
+        try:
+            # 1. Verify repository exists at all
+            repo_res = client.table("repositories").select("id").eq("id", repository_id).execute()
+            if not repo_res.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Repository '{repository_id}' not found.",
+                )
+
+            # 2. Verify repository is in caller's history
+            hist_res = (
+                client.table("user_repository_history")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("repository_id", repository_id)
+                .execute()
+            )
+            if not hist_res.data:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have permission to delete this repository from history or it is not in your history.",
+                )
+
+            # 3. Delete only this user's history record
+            client.table("user_repository_history").delete().eq("user_id", user_id).eq("repository_id", repository_id).execute()
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(f"Error deleting repository history: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to delete repository from history: {str(exc)}",
             )
 
     @classmethod

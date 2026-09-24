@@ -203,6 +203,22 @@ export async function getRepositories(): Promise<Repository[]> {
 }
 
 /**
+ * Remove a repository from the authenticated user's history dropdown.
+ */
+export async function deleteRepositoryHistory(repositoryId: string): Promise<void> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}/repositories/${repositoryId}/history`,
+    {
+      method: 'DELETE',
+    }
+  );
+  if (!response.ok) {
+    const errorMsg = await extractErrorDetail(response, 'Failed to delete repository from history');
+    throw new Error(errorMsg);
+  }
+}
+
+/**
  * Get repository summary by UUID.
  */
 export async function getRepository(repositoryId: string): Promise<Repository> {
