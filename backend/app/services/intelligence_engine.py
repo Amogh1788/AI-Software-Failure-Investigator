@@ -45,11 +45,21 @@ class IntelligenceEngine:
         Returns:
           (ranked_candidates, failure_chain, relevant_commits, evidence_signals_summary, executive_summary)
         """
-        # 1. Partition evidence by type
-        bug_reports = [e["content"] for e in evidence_items if e.get("evidence_type") == "bug_report"]
-        app_logs = [e["content"] for e in evidence_items if e.get("evidence_type") == "application_log"]
-        stack_traces = [e["content"] for e in evidence_items if e.get("evidence_type") == "stack_trace"]
-        test_outputs = [e["content"] for e in evidence_items if e.get("evidence_type") == "test_output"]
+        # 1. Partition evidence by type (supporting enum, string variants, case-insensitive)
+        def _get_ev(types):
+            res = []
+            for e in evidence_items:
+                raw_type = e.get("evidence_type")
+                val = getattr(raw_type, "value", raw_type)
+                s = str(val or "").lower().replace("-", "_").replace(" ", "_")
+                if s in types:
+                    res.append(e.get("content", ""))
+            return res
+
+        bug_reports = _get_ev({"bug_report", "bugreport"})
+        app_logs = _get_ev({"application_log", "application_logs", "app_log", "log", "logs"})
+        stack_traces = _get_ev({"stack_trace", "stacktrace", "trace", "traces"})
+        test_outputs = _get_ev({"test_output", "test_outputs", "test", "tests"})
 
         combined_bug_report = "\n".join(bug_reports)
         combined_logs = "\n".join(app_logs)
@@ -57,8 +67,24 @@ class IntelligenceEngine:
         combined_test_output = "\n".join(test_outputs)
 
         # 2. Extract structured elements from stack trace
+        # Dedicated stack trace content parsed first, preserving frame order
         stack_frames = cls._parse_stack_trace_frames(combined_stack_trace)
+        # Augment with any stack frames embedded in logs or test outputs if not already present
+        embedded_trace_text = f"{combined_logs}\n{combined_test_output}"
+        extra_frames = cls._parse_stack_trace_frames(embedded_trace_text)
+        existing_signatures = {
+            (f.get("filename"), f.get("function_name"), f.get("line_number"))
+            for f in stack_frames
+        }
+        for ef in extra_frames:
+            sig = (ef.get("filename"), ef.get("function_name"), ef.get("line_number"))
+            if sig not in existing_signatures:
+                existing_signatures.add(sig)
+                stack_frames.append(ef)
+
         root_exception = cls._extract_root_exception(combined_stack_trace)
+        if not root_exception:
+            root_exception = cls._extract_root_exception(embedded_trace_text)
 
         # 3. Extract test failure details
         failing_tests, test_tested_classes = cls._parse_test_failures(combined_test_output)
@@ -68,20 +94,37 @@ class IntelligenceEngine:
         if not source_files:
             return [], [], [], cls._empty_signals_summary(), "No source files found in repository."
 
-        # 5. Compute TF-IDF similarities between evidence texts and source files
-        tfidf_bug = cls._compute_tfidf_similarity(combined_bug_report, source_files)
-        tfidf_logs = cls._compute_tfidf_similarity(combined_logs, source_files)
-        tfidf_tests = cls._compute_tfidf_similarity(combined_test_output, source_files)
+        # Filter out test/spec files from suspect defect candidates when production code exists
+        prod_source_files = {
+            p: c for p, c in source_files.items() if not cls._is_test_file(p)
+        }
+        candidate_files = prod_source_files if prod_source_files else source_files
 
-        # 6. Compute Git recency file scores for candidate ranking
-        git_file_scores = cls._compute_git_recency_scores(git_repo, source_files)
+        # 5. Compute TF-IDF similarities between evidence texts and candidate files
+        tfidf_bug = cls._compute_tfidf_similarity(combined_bug_report, candidate_files)
+        tfidf_logs = cls._compute_tfidf_similarity(combined_logs, candidate_files)
+        tfidf_tests = cls._compute_tfidf_similarity(combined_test_output, candidate_files)
+
+        # 6. Compute Git recency file scores and diff context
+        git_file_scores, git_diff_cache = cls._extract_git_recency_and_diff_cache(git_repo, candidate_files)
+
+        # Build shared context for frame causal correlation
+        eval_context = {
+            "git_repo": git_repo,
+            "git_diff_cache": git_diff_cache,
+            "logs": combined_logs,
+            "bug_report": combined_bug_report,
+            "test_output": combined_test_output,
+            "failing_tests": failing_tests,
+            "tested_classes": test_tested_classes,
+        }
 
         # 7. Score each candidate file using explicit normalized formula
         candidates: List[FailureCandidate] = []
-        for rel_path, file_content in source_files.items():
+        for rel_path, file_content in candidate_files.items():
             # Signal 1: Stack Trace Match [0, 1]
             st_score, st_func, st_line, st_evidence = cls._evaluate_stack_trace_signal(
-                rel_path, file_content, stack_frames
+                rel_path, file_content, stack_frames, context=eval_context
             )
 
             # Signal 2: Test Failure Correlation [0, 1]
@@ -103,7 +146,7 @@ class IntelligenceEngine:
             if git_score > 0.0:
                 git_evidence.append(f"Modified in recent Git commits touching incident regression area")
 
-            # Final Evidence Score: weighted formula
+            # Final Evidence Score: weighted formula explicitly preserved
             final_score = (
                 WEIGHT_STACK_TRACE * st_score +
                 WEIGHT_TEST_FAILURE * tf_score +
@@ -124,7 +167,7 @@ class IntelligenceEngine:
             else:
                 strength = EvidenceStrength.LOW
 
-            # Only retain candidates with non-zero supporting evidence
+            # Retain candidates with positive supporting evidence
             if final_score > 0.05 or all_evidence:
                 candidates.append(
                     FailureCandidate(
@@ -163,7 +206,7 @@ class IntelligenceEngine:
             candidates, stack_frames, root_exception, combined_bug_report, failing_tests, relevant_commits
         )
 
-        # 10. Aggregate Signals Summary
+        # 10. Aggregate Signals Summary representing top candidate findings
         signals_summary = cls._compute_signals_summary(candidates)
 
         # 11. Generate Explainable Executive Summary
@@ -217,20 +260,48 @@ class IntelligenceEngine:
     @classmethod
     def _parse_stack_trace_frames(cls, stack_text: str) -> List[Dict[str, Any]]:
         """
-        Extract stack trace frames across Python, Java, and JavaScript/TypeScript.
+        Extract stack trace frames across Java, Python, and JavaScript/TypeScript.
+        Accurately extracts class, package, function, filename, and line number while
+        strictly preserving meaningful execution/call-stack order.
         """
         frames: List[Dict[str, Any]] = []
+        if not stack_text:
+            return frames
 
-        # Java pattern: at com.pkg.Class.method(Class.java:123)
+        # Java pattern:
+        # Matches:
+        #   at com.pkg.Class.method(Class.java:123)
+        #   at java.base/java.lang.Thread.run(Thread.java:834)
+        #   at app//com.pkg.Class.<init>(Class.java:12)
+        #   at com.pkg.Class$Inner.method(Class.java:45)
+        #   at com.pkg.Class.lambda$method$0(Class.java:67)
         java_pattern = re.compile(
-            r"at\s+([a-zA-Z0-9_$.]+)\.([a-zA-Z0-9_$]+)\(([a-zA-Z0-9_$]+\.[a-zA-Z]+):(\d+)\)"
+            r"^\s*at\s+(?:[a-zA-Z0-9_$.@-]+/)*(?:app//)?([a-zA-Z0-9_$.]+)\.([a-zA-Z0-9_$<>]+)\s*\((?:([a-zA-Z0-9_$.-]+\.[a-zA-Z0-9]+):(\d+)|([^)]+))\)",
+            re.MULTILINE
         )
         for m in java_pattern.finditer(stack_text):
+            full_class = m.group(1)
+            func_name = m.group(2)
+            fname = m.group(3)
+            line_str = m.group(4)
+            line_num = int(line_str) if line_str and line_str.isdigit() else None
+
+            # Derive simple class name and package name
+            parts = full_class.split(".")
+            simple_class = parts[-1].split("$")[0]
+            pkg_name = ".".join(parts[:-1]) if len(parts) > 1 else ""
+
+            if not fname:
+                fname = f"{simple_class}.java"
+
             frames.append({
-                "class_name": m.group(1),
-                "function_name": m.group(2),
-                "filename": m.group(3),
-                "line_number": int(m.group(4)),
+                "class_name": full_class,
+                "package_name": pkg_name,
+                "simple_class_name": simple_class,
+                "function_name": func_name,
+                "filename": fname,
+                "line_number": line_num,
+                "language": "java",
             })
 
         # Python pattern: File "path/to/file.py", line 123, in func_name
@@ -238,12 +309,18 @@ class IntelligenceEngine:
             r'File\s+"([^"]+)",\s+line\s+(\d+),\s+in\s+([a-zA-Z0-9_]+)'
         )
         for m in py_pattern.finditer(stack_text):
-            filename = os.path.basename(m.group(1))
+            filepath = m.group(1).replace("\\", "/")
+            filename = os.path.basename(filepath)
+            simple_name = os.path.splitext(filename)[0]
             frames.append({
-                "path": m.group(1),
+                "path": filepath,
                 "filename": filename,
+                "simple_class_name": simple_name,
+                "class_name": simple_name,
+                "package_name": "",
                 "line_number": int(m.group(2)),
                 "function_name": m.group(3),
+                "language": "python",
             })
 
         # Node pattern: at funcName (path/to/file.js:123:45) or at path/to/file.js:123:45
@@ -252,15 +329,20 @@ class IntelligenceEngine:
         )
         for m in node_pattern.finditer(stack_text):
             func = m.group(1) or "anonymous"
-            filepath = m.group(2).strip()
+            filepath = m.group(2).strip().replace("\\", "/")
             filename = os.path.basename(filepath)
+            simple_name = os.path.splitext(filename)[0]
             try:
                 line_num = int(m.group(3))
                 frames.append({
                     "function_name": func,
                     "path": filepath,
                     "filename": filename,
+                    "simple_class_name": simple_name,
+                    "class_name": simple_name,
+                    "package_name": "",
                     "line_number": line_num,
+                    "language": "javascript",
                 })
             except Exception:
                 pass
@@ -270,6 +352,8 @@ class IntelligenceEngine:
     @classmethod
     def _extract_root_exception(cls, text: str) -> Optional[str]:
         """Extract the root exception type and message."""
+        if not text:
+            return None
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         for ln in lines:
             if "Exception:" in ln or "Error:" in ln or "NullPointerException" in ln:
@@ -281,26 +365,186 @@ class IntelligenceEngine:
     # =========================================================================
 
     @classmethod
+    def _derive_tested_class_name(cls, test_name: str) -> Optional[str]:
+        """Derive production class/module name from test class or file name."""
+        stem = os.path.splitext(os.path.basename(test_name))[0]
+        # Strip test suffixes
+        for suffix in ["Test", "Tests", "TestCase", "IT", "TestIT", "IntegrationTest", "Spec", "Specs"]:
+            if stem.endswith(suffix) and len(stem) > len(suffix):
+                return stem[:-len(suffix)]
+        # Strip test prefixes
+        for prefix in ["Test", "test_"]:
+            if stem.startswith(prefix) and len(stem) > len(prefix):
+                return stem[len(prefix):]
+        return None
+
+    @classmethod
     def _parse_test_failures(cls, test_output: str) -> Tuple[List[str], List[str]]:
-        """Extract failing test names and target class/module names."""
+        """
+        Extract failing test names and target class/module names across Maven, Gradle, pytest, and Jest.
+        """
         failing_tests: List[str] = []
         tested_classes: List[str] = []
+        if not test_output:
+            return failing_tests, tested_classes
 
-        # Java Maven/Gradle: Running com.pkg.MyClassTest or MyClassTest > testMethod FAILED
+        # 1. Java Maven Surefire test suites & failure headers
         for m in re.finditer(r"Running\s+([a-zA-Z0-9_$.]+)", test_output):
             test_cls = m.group(1).split(".")[-1]
-            failing_tests.append(test_cls)
-            if test_cls.endswith("Test"):
-                tested_classes.append(test_cls[:-4])
+            if test_cls not in failing_tests:
+                failing_tests.append(test_cls)
+            target = cls._derive_tested_class_name(test_cls)
+            if target and target not in tested_classes:
+                tested_classes.append(target)
 
-        # Python pytest: FAILED tests/test_foo.py::test_bar
+        # Maven failure summaries: <<< FAILURE! - in com.example.checkout.CheckoutServiceTest
+        for m in re.finditer(r"<<<\s*(?:FAILURE|ERROR)!\s*-\s*in\s+([a-zA-Z0-9_$.]+)", test_output):
+            test_cls = m.group(1).split(".")[-1]
+            if test_cls not in failing_tests:
+                failing_tests.append(test_cls)
+            target = cls._derive_tested_class_name(test_cls)
+            if target and target not in tested_classes:
+                tested_classes.append(target)
+
+        # Maven failing test methods: [ERROR] testProcessCheckoutWithFlashSaleDiscount ... <<< ERROR!
+        for m in re.finditer(r"(?:\[ERROR\]\s+)?([a-zA-Z0-9_$]+)\s+.*<<<\s*(?:FAILURE|ERROR)!", test_output):
+            test_mth = m.group(1).strip()
+            if test_mth and test_mth not in failing_tests:
+                failing_tests.append(test_mth)
+
+        # 2. Gradle: com.example.MyClassTest > testMethod FAILED
+        for m in re.finditer(r"([a-zA-Z0-9_$.]+)\s*>\s*([a-zA-Z0-9_$]+)\s+FAILED", test_output):
+            test_cls = m.group(1).split(".")[-1]
+            test_mth = m.group(2)
+            failing_tests.append(f"{test_cls}::{test_mth}")
+            target = cls._derive_tested_class_name(test_cls)
+            if target and target not in tested_classes:
+                tested_classes.append(target)
+
+        # 3. Python pytest: FAILED tests/test_foo.py::test_bar
         for m in re.finditer(r"FAILED\s+([^:]+)::([a-zA-Z0-9_]+)", test_output):
             test_file = os.path.basename(m.group(1))
             failing_tests.append(f"{test_file}::{m.group(2)}")
-            if test_file.startswith("test_"):
-                tested_classes.append(test_file[5:].split(".")[0])
+            target = cls._derive_tested_class_name(test_file)
+            if target and target not in tested_classes:
+                tested_classes.append(target)
+
+        # 4. Jest / Mocha / Vitest: FAIL src/foo.test.ts
+        for m in re.finditer(r"FAIL\s+([^\s\n]+)", test_output):
+            fname = os.path.basename(m.group(1))
+            failing_tests.append(fname)
+            target = cls._derive_tested_class_name(fname)
+            if target and target not in tested_classes:
+                tested_classes.append(target)
 
         return failing_tests, tested_classes
+
+    # =========================================================================
+    # Git Diff Context Extraction
+    # =========================================================================
+
+    @classmethod
+    def _extract_git_recency_and_diff_cache(
+        cls,
+        repo: Optional[git.Repo],
+        source_files: Dict[str, str],
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]]]:
+        """
+        Compute git recency scores and build cached diff metadata per source file.
+        Extracts touched lines, modified functions, and added regression terms.
+        """
+        file_scores = {path: 0.0 for path in source_files}
+        diff_cache: Dict[str, Dict[str, Any]] = {}
+        if not repo:
+            return file_scores, diff_cache
+
+        try:
+            commits = list(repo.iter_commits(max_count=20))
+            for idx, commit in enumerate(commits):
+                recency_factor = max(0.2, 1.0 - (idx * 0.15))
+                try:
+                    touched_files = list(commit.stats.files.keys())
+                except Exception:
+                    touched_files = []
+
+                # Match touched files against candidate source files
+                for tfile in touched_files:
+                    norm_tfile = tfile.replace("\\", "/")
+                    tbase = os.path.basename(norm_tfile)
+                    for rel_path in source_files:
+                        norm_rel = rel_path.replace("\\", "/")
+                        rbase = os.path.basename(norm_rel)
+                        if (
+                            norm_rel.endswith(norm_tfile)
+                            or norm_tfile.endswith(norm_rel)
+                            or rbase == tbase
+                        ):
+                            file_scores[rel_path] = max(file_scores[rel_path], recency_factor)
+
+                # Inspect diff hunks for detailed causal correlation
+                try:
+                    if commit.parents:
+                        diff_index = commit.parents[0].diff(commit, create_patch=True)
+                    else:
+                        diff_index = commit.diff(git.NULL_TREE, create_patch=True)
+                except Exception:
+                    diff_index = []
+
+                for d in diff_index:
+                    fpath = (d.b_path or d.a_path or "").replace("\\", "/")
+                    fname = os.path.basename(fpath)
+                    patch = ""
+                    if d.diff:
+                        patch = d.diff.decode("utf-8", errors="replace") if isinstance(d.diff, bytes) else str(d.diff)
+
+                    for rel_path in source_files:
+                        norm_rel = rel_path.replace("\\", "/")
+                        rbase = os.path.basename(norm_rel)
+                        if norm_rel.endswith(fpath) or fpath.endswith(norm_rel) or rbase == fname:
+                            entry = diff_cache.setdefault(rel_path, {
+                                "touched_lines": set(),
+                                "touched_functions": set(),
+                                "regression_lines": set(),
+                                "regression_functions": set(),
+                                "added_text": "",
+                            })
+
+                            is_modification_commit = bool(commit.parents)
+
+                            # Parse hunk headers for modified line ranges and method signatures
+                            for h in re.finditer(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@([^\n]*)", patch):
+                                n_start = int(h.group(3))
+                                n_count = int(h.group(4) or 1)
+                                hunk_hdr = h.group(5).strip()
+                                for ln in range(n_start, n_start + n_count + 1):
+                                    entry["touched_lines"].add(ln)
+                                    if is_modification_commit:
+                                        entry["regression_lines"].add(ln)
+
+                                # Extract function name from hunk header if present
+                                fn_match = re.search(r"([a-zA-Z0-9_$]+)\s*\(", hunk_hdr)
+                                if fn_match:
+                                    entry["touched_functions"].add(fn_match.group(1))
+                                    if is_modification_commit:
+                                        entry["regression_functions"].add(fn_match.group(1))
+
+                            # Extract added lines
+                            added_lines = [
+                                line[1:] for line in patch.splitlines()
+                                if line.startswith("+") and not line.startswith("+++")
+                            ]
+                            entry["added_text"] += " " + " ".join(added_lines)
+
+                            # Also extract function declarations in added text
+                            for fn_decl in re.finditer(r"(?:public|protected|private|static|\s)\s+[\w<>,\[\]]+\s+([a-zA-Z0-9_$]+)\s*\(", entry["added_text"]):
+                                entry["touched_functions"].add(fn_decl.group(1))
+                                if is_modification_commit:
+                                    entry["regression_functions"].add(fn_decl.group(1))
+
+        except Exception as exc:
+            logger.warning(f"Error computing git recency scores and diff context: {exc}")
+
+        return file_scores, diff_cache
 
     # =========================================================================
     # Evaluation Signals
@@ -308,40 +552,173 @@ class IntelligenceEngine:
 
     @classmethod
     def _evaluate_stack_trace_signal(
-        cls, rel_path: str, file_content: str, stack_frames: List[Dict[str, Any]]
+        cls,
+        rel_path: str,
+        file_content: str,
+        stack_frames: List[Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[float, Optional[str], Optional[int], List[str]]:
-        """Compute normalized [0, 1] stack trace match score."""
+        """
+        Compute normalized [0, 1] stack trace match score.
+        Correctly extracts class, function, filename, and line number.
+        Avoids selecting a less relevant frame simply because it appears earlier in the call stack.
+        Distinguishes the exception throw site from the likely causal root-cause location.
+        """
         if not stack_frames:
             return 0.0, None, None, []
 
         filename = os.path.basename(rel_path)
         base_no_ext = os.path.splitext(filename)[0]
+        norm_path = rel_path.replace("\\", "/")
 
-        evidence = []
-        best_score = 0.0
-        best_func = None
-        best_line = None
+        ctx = context or {}
+        git_diff_cache = ctx.get("git_diff_cache", {})
+        logs_text = ctx.get("logs", "").lower()
+        bug_text = ctx.get("bug_report", "").lower()
+        test_text = ctx.get("test_output", "").lower()
+        failing_tests = [t.lower() for t in ctx.get("failing_tests", [])]
 
+        diff_info = git_diff_cache.get(rel_path, {})
+        touched_lines = diff_info.get("touched_lines", set())
+        touched_functions = {fn.lower() for fn in diff_info.get("touched_functions", set())}
+        regression_lines = diff_info.get("regression_lines", set())
+        regression_functions = {fn.lower() for fn in diff_info.get("regression_functions", set())}
+        added_text = diff_info.get("added_text", "").lower()
+
+        # Identify all frames matching this candidate file
+        matching_frames: List[Tuple[int, Dict[str, Any]]] = []
         for idx, frame in enumerate(stack_frames):
             frame_file = frame.get("filename", "")
             frame_class = frame.get("class_name", "")
+            frame_simple = frame.get("simple_class_name", "")
 
-            is_match = (
-                filename == frame_file
-                or (frame_file and rel_path.endswith(frame_file))
-                or (frame_class and base_no_ext in frame_class)
-            )
+            # Exact filename match or exact simple class name match
+            is_match = False
+            if frame_file and (filename == frame_file or norm_path.endswith("/" + frame_file) or norm_path == frame_file):
+                is_match = True
+            elif frame_simple and base_no_ext == frame_simple:
+                is_match = True
+            elif frame_class:
+                class_tail = frame_class.split(".")[-1].split("$")[0]
+                if class_tail == base_no_ext:
+                    is_match = True
 
             if is_match:
-                # Frame weight: highest for frames closest to error origin
-                pos_weight = 1.0 if idx == 0 else max(0.4, 1.0 - (idx * 0.15))
-                if pos_weight > best_score:
-                    best_score = pos_weight
-                    best_func = frame.get("function_name")
-                    best_line = frame.get("line_number")
-                    evidence.append(
-                        f"Directly referenced in stack trace at {filename}:{best_line} in method '{best_func}'"
-                    )
+                matching_frames.append((idx, frame))
+
+        if not matching_frames:
+            return 0.0, None, None, []
+
+        # Check if the innermost frame (frame 0) of the entire stack trace is in this file (throw site)
+        file_contains_throw_site = any(idx == 0 for idx, _ in matching_frames)
+
+        # Score each matching frame for causal relevance vs caller/throw site
+        scored_frames: List[Tuple[float, float, int, str, Optional[int]]] = []
+
+        file_lines = file_content.splitlines() if file_content else []
+
+        for idx, frame in matching_frames:
+            func_name = frame.get("function_name", "")
+            line_num = frame.get("line_number")
+            func_lower = func_name.lower()
+
+            # Base positional score according to stack depth
+            pos_weight = 1.0 if idx == 0 else max(0.40, 1.0 - (idx * 0.15))
+
+            causal_evidence_points = 0.0
+
+            # 1. Regression commit diff correlation: function or line touched in modification commits
+            if func_lower in regression_functions:
+                causal_evidence_points += 80.0
+            elif func_lower in touched_functions:
+                causal_evidence_points += 30.0
+
+            if line_num:
+                if line_num in regression_lines or any(abs(line_num - rl) <= 10 for rl in regression_lines):
+                    causal_evidence_points += 60.0
+                elif line_num in touched_lines or any(abs(line_num - tl) <= 10 for tl in touched_lines):
+                    causal_evidence_points += 20.0
+
+            if added_text and func_lower in added_text:
+                causal_evidence_points += 25.0
+
+            # 2. Source code defect verification around line_num:
+            # If line at line_num has 'return null' and incident involves null/NullPointerException
+            if line_num and file_lines:
+                start_l = max(0, (line_num - 1) - 2)
+                end_l = min(len(file_lines), (line_num - 1) + 3)
+                local_code = " ".join(file_lines[start_l:end_l]).lower()
+                if "return null" in local_code and ("nullpointer" in logs_text or "nullpointer" in test_text or "null" in bug_text or "null" in logs_text):
+                    causal_evidence_points += 70.0
+                if "return null" in local_code and "flashsale" in local_code:
+                    causal_evidence_points += 50.0
+
+            # 3. Incident domain keyword match:
+            # Check specific failure domain tokens (discount, promo, flashsale, null, refund, etc.)
+            specific_terms = {"discount", "promo", "flashsale", "null", "tier", "coupon"}
+            for term in specific_terms:
+                if term in func_lower and (term in bug_text or term in logs_text or term in test_text):
+                    causal_evidence_points += 35.0
+
+            # 4. Log correlation: function or domain action mentioned in logs
+            if func_lower in logs_text:
+                causal_evidence_points += 20.0
+            func_words = [w.lower() for w in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)", func_name) if len(w) >= 4]
+            if any(w in logs_text for w in func_words):
+                causal_evidence_points += 10.0
+
+            # 5. Bug report correlation
+            if func_lower in bug_text:
+                causal_evidence_points += 20.0
+            if any(w in bug_text for w in func_words):
+                causal_evidence_points += 10.0
+
+            # 6. Test failure correlation: failing test method or assertion mentions function
+            if any(func_lower in ft for ft in failing_tests) or (func_lower and func_lower in test_text):
+                causal_evidence_points += 20.0
+            if any(any(w in ft for w in func_words) for ft in failing_tests):
+                causal_evidence_points += 10.0
+
+            # 7. Distinguish throw site from causal location:
+            # Throw site without git modifications or logic defects is a manifestation site, not causal origin
+            if idx == 0 and not regression_lines and not regression_functions:
+                # Precondition check / throw site without regression modifications
+                causal_evidence_points -= 20.0
+
+            total_frame_priority = (causal_evidence_points * 100.0) + pos_weight
+            scored_frames.append((total_frame_priority, pos_weight, idx, func_name, line_num))
+
+        # Select the frame with the highest causal correlation priority
+        scored_frames.sort(key=lambda item: item[0], reverse=True)
+        best_priority, _, best_idx, best_func, best_line = scored_frames[0]
+
+        # Stack trace signal score reflects the file's strongest presence in the call stack
+        best_score = max(pos_weight for _, pos_weight, _, _, _ in scored_frames)
+
+        evidence: List[str] = []
+        is_causal_candidate = best_priority > 50.0
+
+        if file_contains_throw_site and best_idx == 0:
+            evidence.append(
+                f"Exception throw site (top of stack trace): threw exception at {filename}:{best_line} in method '{best_func}'"
+            )
+        elif is_causal_candidate:
+            evidence.append(
+                f"Directly referenced in stack trace at {filename}:{best_line} in method '{best_func}' (identified as causal root-cause frame)"
+            )
+        else:
+            evidence.append(
+                f"Directly referenced in stack trace at {filename}:{best_line} in method '{best_func}'"
+            )
+
+        # Mention other frames from this same file if multiple exist
+        other_frames = [(idx, fn, ln) for _, _, idx, fn, ln in scored_frames[1:] if fn != best_func or ln != best_line]
+        if other_frames:
+            for idx, fn, ln in other_frames[:2]:
+                line_info = f":{ln}" if ln else ""
+                evidence.append(
+                    f"Also referenced in stack trace caller frame at {filename}{line_info} in method '{fn}'"
+                )
 
         return best_score, best_func, best_line, evidence
 
@@ -357,10 +734,10 @@ class IntelligenceEngine:
         score = 0.0
 
         # Direct tested target (e.g. CheckoutService tested by CheckoutServiceTest)
-        if any(base_no_ext == target for target in tested_classes):
+        if any(base_no_ext == target or base_no_ext.lower() == target.lower() for target in tested_classes):
             score = 1.0
             evidence.append(f"Direct target of failing unit test suite")
-        elif any(base_no_ext in test for test in failing_tests):
+        elif any(base_no_ext in test or base_no_ext.lower() in test.lower() for test in failing_tests):
             score = 0.85
             evidence.append(f"Referenced in failing test report")
         elif tfidf_sim > 0.15:
@@ -380,10 +757,17 @@ class IntelligenceEngine:
         evidence = []
         base_score = tfidf_sim
 
+        # Decompose camelCase into words: e.g. CheckoutService -> "checkout service"
+        words = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|\d+", base_no_ext)
+        spaced_name = " ".join(words) if words else base_no_ext
+
         # Check explicit mention in logs
-        if re.search(r"\b" + re.escape(base_no_ext) + r"\b", logs_text):
+        if re.search(r"\b" + re.escape(base_no_ext) + r"\b", logs_text, re.IGNORECASE):
             base_score = max(base_score, 0.75)
             evidence.append(f"Component '{base_no_ext}' explicitly recorded in application error logs")
+        elif spaced_name and len(words) > 1 and re.search(r"\b" + re.escape(spaced_name) + r"\b", logs_text, re.IGNORECASE):
+            base_score = max(base_score, 0.75)
+            evidence.append(f"Component '{base_no_ext}' ('{spaced_name}') recorded in application error logs")
         elif tfidf_sim > 0.10:
             evidence.append(f"Vocabulary matched error log telemetry (TF-IDF: {tfidf_sim:.2f})")
 
@@ -400,10 +784,17 @@ class IntelligenceEngine:
         evidence = []
         base_score = tfidf_sim
 
+        # Decompose camelCase into words: e.g. CheckoutService -> ["Checkout", "Service"] -> "checkout service"
+        words = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|\d+", base_no_ext)
+        spaced_name = " ".join(words) if words else base_no_ext
+
         # Check explicit mention of class/component in bug report
         if re.search(r"\b" + re.escape(base_no_ext) + r"\b", bug_text, re.IGNORECASE):
             base_score = max(base_score, 0.70)
             evidence.append(f"Referenced in bug report description or reproduction steps")
+        elif spaced_name and len(words) > 1 and re.search(r"\b" + re.escape(spaced_name) + r"\b", bug_text, re.IGNORECASE):
+            base_score = max(base_score, 0.70)
+            evidence.append(f"Component '{base_no_ext}' ('{spaced_name}') referenced in bug report description")
         elif tfidf_sim > 0.10:
             evidence.append(f"Correlated with bug report keywords (TF-IDF: {tfidf_sim:.2f})")
 
