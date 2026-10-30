@@ -174,8 +174,14 @@ def test_intelligence_engine_evaluation_fixture_recall(temp_checkout_repo):
     top_candidate = candidates[0]
     assert top_candidate.file_path == ground_truth_target
     assert top_candidate.evidence_strength == EvidenceStrength.HIGH
-    assert top_candidate.function_name in ["applyDiscount", "processCheckout"]
-    assert top_candidate.line_number in [21, 31, 38]
+    assert top_candidate.function_name == "applyDiscount", (
+        f"Expected causal function 'applyDiscount' (upstream null-return defect), "
+        f"got '{top_candidate.function_name}' — engine is selecting the exception throw site "
+        f"instead of the root-cause location"
+    )
+    assert top_candidate.line_number == 31, (
+        f"Expected causal line 31 (applyDiscount return null), got {top_candidate.line_number}"
+    )
 
     # Verify signals breakdown
     sig = top_candidate.signals
@@ -226,10 +232,87 @@ def test_intelligence_engine_evaluation_fixture_recall(temp_checkout_repo):
         assert "regression-introducing" not in c.relevance_reason.lower()
         assert "Baseline setup commit" in c.relevance_reason
 
+# ====================================================================
+# 1b. Regression: Throw-site vs Root-cause Causal Location
+# ====================================================================
 
-# ====================================================================
-# 2. HTTP 409 Guard on Draft Investigation
-# ====================================================================
+def test_stack_trace_causal_vs_throw_site_null_propagation(temp_checkout_repo):
+    """
+    Regression test: when a null value produced by an upstream method (applyDiscount)
+    propagates into a downstream method that throws the NPE (setAmount), the engine
+    must identify the upstream defect location — not the exception throw site.
+
+    Stack trace layout (innermost first):
+      [0] PaymentRequestBuilder.setAmount       <- exception THROWN here (victim)
+      [1] CheckoutService.processCheckout       <- passes null to setAmount
+      [2] CheckoutService.applyDiscount         <- ROOT CAUSE: returns null on FLASHSALE
+      [3] CheckoutController.handleCheckout     <- entry point
+
+    Expected:
+      - src/CheckoutService.java ranks #1
+      - function_name == 'applyDiscount'  (NOT 'processCheckout' or 'setAmount')
+      - line_number == 31                 (the return null statement)
+      - PaymentRequestBuilder.java does NOT rank #1
+    """
+    tmp_repo_dir, git_repo = temp_checkout_repo
+    evidence_dir = FIXTURE_PATH / "evidence"
+    bug_report = (evidence_dir / "bug_report.txt").read_text(encoding="utf-8")
+    app_log = (evidence_dir / "application.log").read_text(encoding="utf-8")
+    stack_trace = (evidence_dir / "stack_trace.txt").read_text(encoding="utf-8")
+    test_output = (evidence_dir / "test_output.txt").read_text(encoding="utf-8")
+
+    evidence_items = [
+        {"evidence_type": "bug_report", "content": bug_report},
+        {"evidence_type": "application_log", "content": app_log},
+        {"evidence_type": "stack_trace", "content": stack_trace},
+        {"evidence_type": "test_output", "content": test_output},
+    ]
+
+    candidates, _, _, _, _ = IntelligenceEngine.analyze(
+        repo_dir=str(tmp_repo_dir),
+        git_repo=git_repo,
+        evidence_items=evidence_items,
+    )
+
+    assert len(candidates) >= 1
+    top = candidates[0]
+
+    # The top-ranked file must be the defect origin, not the exception throw site
+    assert top.file_path == "src/CheckoutService.java", (
+        f"Expected src/CheckoutService.java at Rank #1, got {top.file_path!r}. "
+        f"Engine is ranking the NPE throw site (PaymentRequestBuilder) above the causal defect."
+    )
+
+    # The reported causal function must be the upstream defect, not the throw site
+    assert top.function_name == "applyDiscount", (
+        f"Expected causal function 'applyDiscount' (returns null on FLASHSALE), "
+        f"got '{top.function_name}'. Engine is pointing at the manifestation site."
+    )
+
+    # Line 31 is 'return null;' inside applyDiscount
+    assert top.line_number == 31, (
+        f"Expected line 31 (return null in applyDiscount), got {top.line_number}"
+    )
+
+    # PaymentRequestBuilder must NOT be Rank #1 — it is the victim of the null, not the source
+    all_paths = [c.file_path for c in candidates]
+    if "src/PaymentRequestBuilder.java" in all_paths:
+        prb_rank = all_paths.index("src/PaymentRequestBuilder.java") + 1
+        assert prb_rank > 1, (
+            f"PaymentRequestBuilder ranked #{prb_rank} but should rank below CheckoutService. "
+            f"Engine is treating the NPE throw site as the root cause."
+        )
+
+    # Stack trace score must be positive (frame matched) and reflect causal frame weight
+    sig = top.signals
+    assert sig.stack_trace_score > 0, "Stack trace score for CheckoutService must be positive"
+    assert sig.stack_trace_score < 1.0, (
+        f"Stack trace score {sig.stack_trace_score} should be < 1.0 for a causal frame "
+        f"that is not the innermost throw site (frame[0])"
+    )
+
+
+
 
 def test_analyze_draft_investigation_returns_409():
     """

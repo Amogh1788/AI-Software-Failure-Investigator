@@ -679,21 +679,32 @@ class IntelligenceEngine:
             if any(any(w in ft for w in func_words) for ft in failing_tests):
                 causal_evidence_points += 10.0
 
-            # 7. Distinguish throw site from causal location:
-            # Throw site without git modifications or logic defects is a manifestation site, not causal origin
+            # 7. Distinguish throw site from causal location.
+            # When a frame is at the top of the call stack (innermost, idx==0) and carries no
+            # causal evidence (no regression diff touch, no domain defect keywords), it is a
+            # manifestation / victim site rather than the origin of the defect.  Apply a
+            # "victim-site discount" to its effective positional weight so it cannot outrank a
+            # downstream frame that holds genuine causal evidence.
             if idx == 0 and not regression_lines and not regression_functions:
-                # Precondition check / throw site without regression modifications
                 causal_evidence_points -= 20.0
+                # Victim-site discount: reduce pos_weight so this file's st_score is
+                # lower than a causal frame at a deeper stack position.
+                pos_weight = pos_weight * 0.45
 
             total_frame_priority = (causal_evidence_points * 100.0) + pos_weight
             scored_frames.append((total_frame_priority, pos_weight, idx, func_name, line_num))
 
         # Select the frame with the highest causal correlation priority
         scored_frames.sort(key=lambda item: item[0], reverse=True)
-        best_priority, _, best_idx, best_func, best_line = scored_frames[0]
+        best_priority, best_pos_weight, best_idx, best_func, best_line = scored_frames[0]
 
-        # Stack trace signal score reflects the file's strongest presence in the call stack
-        best_score = max(pos_weight for _, pos_weight, _, _, _ in scored_frames)
+        # Stack trace signal score is the positional weight of the best-priority (causal) frame.
+        # Using max(pos_weight) over all frames would incorrectly award the throw-site frame's
+        # pos_weight=1.0 even when that frame is merely the manifestation site and a deeper
+        # causal frame was correctly selected.  We use the selected frame's own pos_weight so
+        # that throw-site victim files (e.g. PaymentRequestBuilder) score lower than the file
+        # that produced the defective value (e.g. CheckoutService.applyDiscount).
+        best_score = best_pos_weight
 
         evidence: List[str] = []
         is_causal_candidate = best_priority > 50.0
